@@ -14,6 +14,9 @@ builds a material that uses the baked Base Color on `SimpleBake` while the
 original supporting textures use `UVMap`. The original Base Color branch is
 discarded. Objects whose names contain `Leaf` or `Alpha` use a restricted mode
 that retains only the original Alpha branch alongside the baked Base Color.
+Disconnected Base Color, normal, mix, mapping, and other intermediate nodes are
+pruned from the generated material. Source objects, meshes, UVs, materials,
+node graphs, transforms, collection membership, and selection remain unchanged.
 
 Running the operation again safely replaces only a previous `Name_M` generated
 by PM VR. Untagged name collisions, incompatible topology, ambiguous materials,

@@ -91,6 +91,27 @@ def upstream_nodes(input_sockets):
     return found
 
 
+def prune_unreachable_nodes(node_tree):
+    outputs = [
+        node for node in node_tree.nodes
+        if node.type == 'OUTPUT_MATERIAL' and node.is_active_output
+    ]
+    if not outputs:
+        raise MaterialRebuildError("material has no active Material Output")
+
+    reachable_keys = {node.as_pointer() for node in outputs}
+    reachable_keys.update(
+        upstream_nodes(
+            socket
+            for output in outputs
+            for socket in output.inputs
+        )
+    )
+    for node in list(node_tree.nodes):
+        if node.as_pointer() not in reachable_keys:
+            node_tree.nodes.remove(node)
+
+
 def get_baked_image(material):
     principled = get_single_principled(material, "Baked")
     base_color = principled.inputs.get("Base Color")
@@ -199,6 +220,7 @@ def configure_material(original_material, baked_image, output_name, alpha_only=F
 
     baked_uv.location = (principled.location.x - 900, principled.location.y - 350)
     baked_texture.location = (principled.location.x - 600, principled.location.y - 350)
+    prune_unreachable_nodes(tree)
     return material
 
 
@@ -284,6 +306,7 @@ def rebuild_pair(scene, original, baked):
             id_block[TAG_SOURCE] = source_name
 
         scene.collection.objects.link(new_object)
+        new_object.select_set(False)
         remove_previous_output(source_name, output_name)
         new_object.name = output_name
         new_mesh.name = output_name
@@ -341,12 +364,6 @@ class PMVR_OT_RebuildBakedMaterials(bpy.types.Operator):
 
         for name in unmatched:
             print(f'[PM VR][Material Rebuild] Skipped "{name}": matching original not selected')
-
-        if succeeded:
-            bpy.ops.object.select_all(action='DESELECT')
-            for obj in succeeded:
-                obj.select_set(True)
-            context.view_layer.objects.active = succeeded[-1]
 
         skipped_count = len(failed) + len(unmatched)
         if skipped_count:
