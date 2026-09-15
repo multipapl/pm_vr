@@ -143,9 +143,21 @@ def export_glb(collection, filepath):
 
 
 class PMVR_ExportCollectionItem(bpy.types.PropertyGroup):
-    collection: bpy.props.PointerProperty(name="Collection", type=bpy.types.Collection)
-    export_usdz: bpy.props.BoolProperty(name="USDZ", default=True)
-    export_glb: bpy.props.BoolProperty(name="GLB", default=True)
+    collection: bpy.props.PointerProperty(
+        name="Collection",
+        description="Blender collection exported by this row",
+        type=bpy.types.Collection,
+    )
+    export_usdz: bpy.props.BoolProperty(
+        name="USDZ",
+        description="Include this collection when exporting checked USDZ files",
+        default=True,
+    )
+    export_glb: bpy.props.BoolProperty(
+        name="GLB",
+        description="Include this collection when exporting checked GLB files",
+        default=True,
+    )
     export_name: bpy.props.StringProperty(
         name="Export Name",
         description="Persistent filename shared by USDZ and GLB; extension is added automatically",
@@ -171,8 +183,8 @@ class PMVR_UL_ExportCollections(bpy.types.UIList):
         _index,
     ):
         row = layout.row(align=True)
-        row.prop(item, "export_usdz", text="U", toggle=True)
-        row.prop(item, "export_glb", text="G", toggle=True)
+        row.prop(item, "export_usdz", text="USDZ", toggle=True)
+        row.prop(item, "export_glb", text="GLB", toggle=True)
         if item.collection:
             row.label(text=item.collection.name, icon='OUTLINER_COLLECTION')
         else:
@@ -251,6 +263,7 @@ class PMVR_OT_AddActiveCollection(bpy.types.Operator):
 class PMVR_OT_RemoveExportCollection(bpy.types.Operator):
     bl_idname = "pm_vr.remove_export_collection"
     bl_label = "Remove Export Collection"
+    bl_description = "Remove only the active collection from the export list"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -266,29 +279,26 @@ class PMVR_OT_RemoveExportCollection(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class PMVR_OT_ClearExportCollections(bpy.types.Operator):
-    bl_idname = "pm_vr.clear_export_collections"
-    bl_label = "Clear Export Collections"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context):
-        return bool(context.scene.pm_vr_export_collections)
-
-    def execute(self, context):
-        context.scene.pm_vr_export_collections.clear()
-        context.scene.pm_vr_export_collection_index = 0
-        return {'FINISHED'}
-
-
 class PMVR_OT_SetAllExportCollections(bpy.types.Operator):
     bl_idname = "pm_vr.set_all_export_collections"
     bl_label = "Set Export Checkboxes"
+    bl_description = "Enable or disable one export format for every collection in the list"
 
     export_format: bpy.props.EnumProperty(
+        name="Format",
+        description="Export format whose checkboxes will be changed",
         items=(('USDZ', "USDZ", ""), ('GLB', "GLB", "")),
     )
-    enabled: bpy.props.BoolProperty(default=True)
+    enabled: bpy.props.BoolProperty(
+        name="Enabled",
+        description="Enable when checked; disable when unchecked",
+        default=True,
+    )
+
+    @classmethod
+    def description(cls, _context, properties):
+        action = "Enable" if properties.enabled else "Disable"
+        return f"{action} {properties.export_format} export for every collection in the list"
 
     def execute(self, context):
         property_name = "export_usdz" if self.export_format == 'USDZ' else "export_glb"
@@ -310,6 +320,12 @@ class PMVR_OT_ExportCollections(bpy.types.Operator):
         ),
         default='BOTH',
     )
+
+    @classmethod
+    def description(cls, _context, properties):
+        if properties.export_format == 'BOTH':
+            return "Export all collections checked for USDZ and GLB"
+        return f"Export every collection checked for {properties.export_format}"
 
     @classmethod
     def poll(cls, context):
@@ -420,6 +436,17 @@ def draw_ui(layout, context):
     box.label(text="Collection Batch Export", icon='EXPORT')
     box.prop(scene, "pm_vr_usdz_export_directory", text="USDZ Directory")
     box.prop(scene, "pm_vr_glb_export_directory", text="GLB Directory")
+
+    header = box.row(align=True)
+    for format_name in ('USDZ', 'GLB'):
+        header.label(text=format_name)
+        op = header.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="All")
+        op.export_format = format_name
+        op.enabled = True
+        op = header.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="None")
+        op.export_format = format_name
+        op.enabled = False
+
     box.template_list(
         PMVR_UL_ExportCollections.__name__,
         "",
@@ -433,19 +460,7 @@ def draw_ui(layout, context):
     controls = box.row(align=True)
     controls.operator(PMVR_OT_AddActiveCollection.bl_idname, text="Add Active", icon='ADD')
     controls.operator(PMVR_OT_RemoveExportCollection.bl_idname, text="", icon='REMOVE')
-    controls.operator(PMVR_OT_ClearExportCollections.bl_idname, text="", icon='TRASH')
 
-    for format_name in ('USDZ', 'GLB'):
-        toggles = box.row(align=True)
-        toggles.label(text=f"{format_name}:")
-        op = toggles.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="All")
-        op.export_format = format_name
-        op.enabled = True
-        op = toggles.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="None")
-        op.export_format = format_name
-        op.enabled = False
-
-    box.label(text="U = USDZ, G = GLB", icon='INFO')
     box.label(text="Outliner: right-click selected collections to add", icon='INFO')
 
     exports = box.row(align=True)
@@ -470,7 +485,6 @@ CLASSES = (
     PMVR_OT_AddExportCollections,
     PMVR_OT_AddActiveCollection,
     PMVR_OT_RemoveExportCollection,
-    PMVR_OT_ClearExportCollections,
     PMVR_OT_SetAllExportCollections,
     PMVR_OT_ExportCollections,
 )
@@ -485,11 +499,13 @@ def register():
     bpy.types.Scene.pm_vr_export_collection_index = bpy.props.IntProperty(default=0, min=0)
     bpy.types.Scene.pm_vr_usdz_export_directory = bpy.props.StringProperty(
         name="USDZ Export Directory",
+        description="Directory for separate USDZ files; // is relative to the Blender file",
         subtype='DIR_PATH',
         default=DEFAULT_USDZ_DIRECTORY,
     )
     bpy.types.Scene.pm_vr_glb_export_directory = bpy.props.StringProperty(
         name="GLB Export Directory",
+        description="Directory for separate GLB files; // is relative to the Blender file",
         subtype='DIR_PATH',
         default=DEFAULT_GLB_DIRECTORY,
     )
