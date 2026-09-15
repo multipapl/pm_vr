@@ -3,13 +3,14 @@ import importlib
 
 from .modules import lightmap_baker
 from .modules import collection_export
+from .modules import material_rebuild
 from .modules import vr_project_tools
 
 
 bl_info = {
     "name": "PM VR",
     "author": "multipapl",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (5, 2, 0),
     "location": "View3D > N-Panel > PM VR",
     "description": "Internal tools for VR project production",
@@ -17,7 +18,7 @@ bl_info = {
 }
 
 
-MODULES = (lightmap_baker, vr_project_tools, collection_export)
+MODULES = (lightmap_baker, vr_project_tools, material_rebuild, collection_export)
 CATEGORIES = (
     ("LIGHTMAP_BAKER", "LIGHTMAP BAKER", "show_lightmap_baker", "LIGHTPROBE_SPHERE"),
     ("VR_PROJECT", "VR PROJECT", "show_vr_project", "WORLD"),

@@ -5,6 +5,18 @@ A collection of internal tools for working on VR projects in Blender.
 The addon currently includes VR project preparation tools, a lightmap baking workflow,
 and persistent collection-based batch export to USDZ and GLB.
 
+## Baked PBR material preparation
+
+Select matching mesh pairs named `Name` and `Name_Baked`, then run **Prepare
+Baked Material Pairs** in the VR Project section. PM VR creates `Name_M` in the
+Scene Collection, restores `UVMap` and `SimpleBake` from the original mesh, and
+builds a material that uses the baked Base Color on `SimpleBake` while the
+original supporting textures use `UVMap`.
+
+Running the operation again safely replaces only a previous `Name_M` generated
+by PM VR. Untagged name collisions, incompatible topology, ambiguous materials,
+and missing textures are skipped and reported without overwriting user data.
+
 ## Collection batch export
 
 Select collections in Blender's Outliner and use **Add to PM VR Export List** from
