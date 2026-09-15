@@ -36,6 +36,23 @@ def selected_outliner_collections(context):
     return [item for item in selected_ids if isinstance(item, bpy.types.Collection)]
 
 
+def add_collection_to_export_list(items, collection):
+    """Add one collection, rolling back cleanly when Blender rejects its pointer."""
+    if not collection:
+        return False, "missing collection"
+    if getattr(collection, "is_embedded_data", False):
+        return False, "Scene Collection cannot be stored as an export item"
+
+    item = items.add()
+    try:
+        item.collection = collection
+        item.export_name = collection.name
+    except (RuntimeError, TypeError) as exc:
+        items.remove(len(items) - 1)
+        return False, str(exc)
+    return True, ""
+
+
 def export_filepath(directory, export_name, extension):
     return os.path.join(directory, f"{sanitize_export_name(export_name)}{extension}")
 
@@ -177,20 +194,31 @@ class PMVR_OT_AddExportCollections(bpy.types.Operator):
         items = context.scene.pm_vr_export_collections
         existing = {item.collection.as_pointer() for item in items if item.collection}
         added = 0
+        skipped = []
 
         for collection in selected_outliner_collections(context):
             if collection.as_pointer() in existing:
+                skipped.append((collection.name, "already in the list"))
                 continue
-            item = items.add()
-            item.collection = collection
-            item.export_name = collection.name
+            was_added, reason = add_collection_to_export_list(items, collection)
+            if not was_added:
+                skipped.append((collection.name, reason))
+                continue
             existing.add(collection.as_pointer())
             added += 1
 
         if added:
             context.scene.pm_vr_export_collection_index = len(items) - 1
-        self.report({'INFO'}, f"Added {added} collection(s) to the export list")
-        return {'FINISHED'}
+        for name, reason in skipped:
+            print(f'[PM VR][Export List] Skipped "{name}": {reason}')
+        if skipped:
+            self.report(
+                {'WARNING'},
+                f"Added {added} collection(s), skipped {len(skipped)}; see the console",
+            )
+        else:
+            self.report({'INFO'}, f"Added {added} collection(s) to the export list")
+        return {'FINISHED'} if added else {'CANCELLED'}
 
 
 class PMVR_OT_AddActiveCollection(bpy.types.Operator):
@@ -211,9 +239,10 @@ class PMVR_OT_AddActiveCollection(bpy.types.Operator):
             self.report({'INFO'}, f'Collection "{collection.name}" is already in the list')
             return {'CANCELLED'}
 
-        item = items.add()
-        item.collection = collection
-        item.export_name = collection.name
+        was_added, reason = add_collection_to_export_list(items, collection)
+        if not was_added:
+            self.report({'WARNING'}, f'Could not add "{collection.name}": {reason}')
+            return {'CANCELLED'}
         context.scene.pm_vr_export_collection_index = len(items) - 1
         self.report({'INFO'}, f'Added "{collection.name}"')
         return {'FINISHED'}
