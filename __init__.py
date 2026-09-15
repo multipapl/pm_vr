@@ -2,13 +2,14 @@ import bpy
 import importlib
 
 from .modules import lightmap_baker
+from .modules import collection_export
 from .modules import vr_project_tools
 
 
 bl_info = {
     "name": "PM VR",
     "author": "multipapl",
-    "version": (1, 0, 0),
+    "version": (1, 1, 0),
     "blender": (5, 2, 0),
     "location": "View3D > N-Panel > PM VR",
     "description": "Internal tools for VR project production",
@@ -16,10 +17,11 @@ bl_info = {
 }
 
 
-MODULES = (lightmap_baker, vr_project_tools)
+MODULES = (lightmap_baker, vr_project_tools, collection_export)
 CATEGORIES = (
     ("LIGHTMAP_BAKER", "LIGHTMAP BAKER", "show_lightmap_baker", "LIGHTPROBE_SPHERE"),
     ("VR_PROJECT", "VR PROJECT", "show_vr_project", "WORLD"),
+    ("COLLECTION_EXPORT", "COLLECTION EXPORT", "show_collection_export", "EXPORT"),
 )
 
 
@@ -28,6 +30,7 @@ class PMVR_UI_State(bpy.types.PropertyGroup):
 
     show_lightmap_baker: bpy.props.BoolProperty(name="Lightmap Baker", default=True)
     show_vr_project: bpy.props.BoolProperty(name="VR Project", default=True)
+    show_collection_export: bpy.props.BoolProperty(name="Collection Export", default=True)
 
 
 class PMVR_PT_MainPanel(bpy.types.Panel):
