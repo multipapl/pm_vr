@@ -16,6 +16,9 @@ format buttons to create one file per checked collection. USDZ uses the PM VR
 Apple Vision Pro preset; GLB uses WebP textures at quality 75 and Draco mesh
 compression with the project preset.
 
+Interactive exports show the current collection, format, completed job count,
+and a progress indicator. A persistent summary is shown when the batch finishes.
+
 ## Installation
 
 Install or link this directory as the `PM_VR` Blender addon, then enable **PM VR** in Blender preferences. The tools appear in **View3D > N-Panel > PM VR**.

@@ -142,6 +142,96 @@ def export_glb(collection, filepath):
     )
 
 
+class ExportValidationError(RuntimeError):
+    pass
+
+
+def build_export_jobs(scene, format_names):
+    jobs = []
+    for format_name in format_names:
+        property_name = "export_usdz" if format_name == 'USDZ' else "export_glb"
+        directory_property = (
+            "pm_vr_usdz_export_directory"
+            if format_name == 'USDZ'
+            else "pm_vr_glb_export_directory"
+        )
+        directory_value = getattr(scene, directory_property)
+        items = [
+            item for item in scene.pm_vr_export_collections
+            if getattr(item, property_name)
+        ]
+        if not items:
+            continue
+        if directory_value.startswith("//") and not bpy.data.filepath:
+            raise ExportValidationError(
+                f"Save the Blender file before using the relative {format_name} path"
+            )
+        directory = bpy.path.abspath(directory_value)
+        if not directory:
+            raise ExportValidationError(f"Choose a {format_name} export directory")
+        try:
+            os.makedirs(directory, exist_ok=True)
+        except OSError as exc:
+            raise ExportValidationError(
+                f"Cannot create the {format_name} directory: {exc}"
+            ) from exc
+
+        invalid = [
+            item for item in items
+            if not item.collection or not sanitize_export_name(item.export_name)
+        ]
+        if invalid:
+            raise ExportValidationError(
+                f"{format_name} rows contain a missing collection or empty name"
+            )
+        names = [sanitize_export_name(item.export_name).casefold() for item in items]
+        if len(names) != len(set(names)):
+            raise ExportValidationError(
+                f"{format_name} rows contain duplicate export names"
+            )
+        jobs.extend((format_name, directory, item) for item in items)
+
+    if not jobs:
+        raise ExportValidationError("No collections are checked for the requested format")
+    return jobs
+
+
+def perform_export_job(format_name, directory, item):
+    extension = ".usdz" if format_name == 'USDZ' else ".glb"
+    filepath = export_filepath(directory, item.export_name, extension)
+    temp_path = temporary_filepath(filepath)
+    status_property = f"last_{format_name.lower()}_status"
+    path_property = f"last_{format_name.lower()}_path"
+    time_property = f"last_{format_name.lower()}_time"
+    setattr(item, status_property, "Exporting")
+
+    try:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        exporter = export_usdz if format_name == 'USDZ' else export_glb
+        result = exporter(item.collection, temp_path)
+        if 'FINISHED' not in result or not os.path.exists(temp_path):
+            raise RuntimeError(f"Blender did not produce a {format_name} file")
+        os.replace(temp_path, filepath)
+        setattr(item, status_property, "Exported")
+        setattr(item, path_property, filepath)
+        setattr(item, time_property, datetime.now().isoformat(timespec="seconds"))
+        print(f'[PM VR][{format_name}] Exported "{item.collection.name}" -> "{filepath}"')
+        return True
+    except Exception as exc:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        setattr(item, status_property, f"Failed: {exc}")
+        print(f'[PM VR][{format_name}] Failed "{item.collection.name}": {exc}')
+        return False
+
+
+def tag_redraw_all(window_manager):
+    for window in window_manager.windows:
+        for area in window.screen.areas:
+            area.tag_redraw()
+
+
 class PMVR_ExportCollectionItem(bpy.types.PropertyGroup):
     collection: bpy.props.PointerProperty(
         name="Collection",
@@ -329,7 +419,7 @@ class PMVR_OT_ExportCollections(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return any(
+        return not context.scene.pm_vr_export_running and any(
             item.export_usdz or item.export_glb
             for item in context.scene.pm_vr_export_collections
         )
@@ -339,90 +429,129 @@ class PMVR_OT_ExportCollections(bpy.types.Operator):
             return ('USDZ', 'GLB')
         return (self.export_format,)
 
-    def execute(self, context):
+    def _prepare_jobs(self, context):
+        try:
+            return build_export_jobs(context.scene, self._formats())
+        except ExportValidationError as exc:
+            self.report({'ERROR'}, str(exc))
+            return None
+
+    def _set_progress(self, context, completed, label):
+        total = max(1, len(self._jobs))
+        context.scene.pm_vr_export_progress = completed / total
+        context.scene.pm_vr_export_progress_label = label
+        context.window_manager.progress_update(completed)
+        if context.workspace:
+            context.workspace.status_text_set(label)
+        tag_redraw_all(context.window_manager)
+
+    def _finish(self, context, cancelled=False):
+        window_manager = context.window_manager
+        if getattr(self, "_timer", None) is not None:
+            window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        window_manager.progress_end()
+        if context.workspace:
+            context.workspace.status_text_set(None)
+
         scene = context.scene
-        jobs = []
+        scene.pm_vr_export_running = False
+        completed = self._succeeded + self._failed
+        scene.pm_vr_export_progress = completed / max(1, len(self._jobs))
+        if cancelled:
+            summary = f"Export cancelled: {self._succeeded} completed, {self._failed} failed"
+            self.report({'WARNING'}, summary)
+            result = {'CANCELLED'}
+        elif self._failed:
+            summary = f"Export finished: {self._succeeded} completed, {self._failed} failed"
+            self.report({'WARNING'}, f"{summary}; see the console")
+            result = {'FINISHED'} if self._succeeded else {'CANCELLED'}
+        else:
+            summary = f"Export finished: {self._succeeded} file(s) completed"
+            self.report({'INFO'}, summary)
+            result = {'FINISHED'}
+        scene.pm_vr_export_progress_label = summary
+        scene.pm_vr_export_summary = summary
+        tag_redraw_all(window_manager)
+        return result
 
-        for format_name in self._formats():
-            property_name = "export_usdz" if format_name == 'USDZ' else "export_glb"
-            directory_property = (
-                "pm_vr_usdz_export_directory"
-                if format_name == 'USDZ'
-                else "pm_vr_glb_export_directory"
-            )
-            directory_value = getattr(scene, directory_property)
-            items = [
-                item for item in scene.pm_vr_export_collections
-                if getattr(item, property_name)
-            ]
-            if not items:
-                continue
-            if directory_value.startswith("//") and not bpy.data.filepath:
-                self.report({'ERROR'}, f"Save the Blender file before using the relative {format_name} path")
-                return {'CANCELLED'}
-            directory = bpy.path.abspath(directory_value)
-            if not directory:
-                self.report({'ERROR'}, f"Choose a {format_name} export directory")
-                return {'CANCELLED'}
-            try:
-                os.makedirs(directory, exist_ok=True)
-            except OSError as exc:
-                self.report({'ERROR'}, f"Cannot create the {format_name} directory: {exc}")
-                return {'CANCELLED'}
+    def execute(self, context):
+        """Synchronous path for scripts and automated tests."""
+        jobs = self._prepare_jobs(context)
+        if jobs is None:
+            return {'CANCELLED'}
+        self._jobs = jobs
+        self._succeeded = 0
+        self._failed = 0
+        self._timer = None
+        context.scene.pm_vr_export_running = True
+        context.scene.pm_vr_export_summary = ""
+        context.window_manager.progress_begin(0, len(jobs))
 
-            invalid = [
-                item for item in items
-                if not item.collection or not sanitize_export_name(item.export_name)
-            ]
-            if invalid:
-                self.report({'ERROR'}, f"{format_name} rows contain a missing collection or empty name")
-                return {'CANCELLED'}
-            names = [sanitize_export_name(item.export_name).casefold() for item in items]
-            if len(names) != len(set(names)):
-                self.report({'ERROR'}, f"{format_name} rows contain duplicate export names")
-                return {'CANCELLED'}
-            jobs.extend((format_name, directory, item) for item in items)
+        for index, (format_name, directory, item) in enumerate(jobs):
+            label = f"Exporting {format_name}: {item.export_name} ({index + 1}/{len(jobs)})"
+            self._set_progress(context, index, label)
+            if perform_export_job(format_name, directory, item):
+                self._succeeded += 1
+            else:
+                self._failed += 1
+        return self._finish(context)
 
-        if not jobs:
-            self.report({'WARNING'}, "No collections are checked for the requested format")
+    def invoke(self, context, _event):
+        jobs = self._prepare_jobs(context)
+        if jobs is None:
             return {'CANCELLED'}
 
-        succeeded = 0
-        failed = 0
-        for format_name, directory, item in jobs:
-            extension = ".usdz" if format_name == 'USDZ' else ".glb"
-            filepath = export_filepath(directory, item.export_name, extension)
-            temp_path = temporary_filepath(filepath)
-            status_property = f"last_{format_name.lower()}_status"
-            path_property = f"last_{format_name.lower()}_path"
-            time_property = f"last_{format_name.lower()}_time"
-            setattr(item, status_property, "Exporting")
+        self._jobs = jobs
+        self._job_index = 0
+        self._succeeded = 0
+        self._failed = 0
+        self._phase = 'ANNOUNCE'
+        scene = context.scene
+        scene.pm_vr_export_running = True
+        scene.pm_vr_export_progress = 0.0
+        scene.pm_vr_export_progress_label = f"Preparing {len(jobs)} export job(s)..."
+        scene.pm_vr_export_summary = ""
 
-            try:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                exporter = export_usdz if format_name == 'USDZ' else export_glb
-                result = exporter(item.collection, temp_path)
-                if 'FINISHED' not in result or not os.path.exists(temp_path):
-                    raise RuntimeError(f"Blender did not produce a {format_name} file")
-                os.replace(temp_path, filepath)
-                setattr(item, status_property, "Exported")
-                setattr(item, path_property, filepath)
-                setattr(item, time_property, datetime.now().isoformat(timespec="seconds"))
-                succeeded += 1
-                print(f'[PM VR][{format_name}] Exported "{item.collection.name}" -> "{filepath}"')
-            except Exception as exc:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-                setattr(item, status_property, f"Failed: {exc}")
-                failed += 1
-                print(f'[PM VR][{format_name}] Failed "{item.collection.name}": {exc}')
+        window_manager = context.window_manager
+        window_manager.progress_begin(0, len(jobs))
+        self._timer = window_manager.event_timer_add(0.1, window=context.window)
+        window_manager.modal_handler_add(self)
+        tag_redraw_all(window_manager)
+        return {'RUNNING_MODAL'}
 
-        if failed:
-            self.report({'WARNING'}, f"Exported {succeeded}, failed {failed}; see the console")
+    def modal(self, context, event):
+        if event.type == 'ESC':
+            return self._finish(context, cancelled=True)
+        if event.type != 'TIMER':
+            return {'RUNNING_MODAL'}
+
+        if self._job_index >= len(self._jobs):
+            return self._finish(context)
+
+        format_name, directory, item = self._jobs[self._job_index]
+        if self._phase == 'ANNOUNCE':
+            label = (
+                f"Exporting {format_name}: {item.export_name} "
+                f"({self._job_index + 1}/{len(self._jobs)})"
+            )
+            setattr(item, f"last_{format_name.lower()}_status", "Exporting")
+            self._set_progress(context, self._job_index, label)
+            self._phase = 'EXPORT'
+            return {'RUNNING_MODAL'}
+
+        if perform_export_job(format_name, directory, item):
+            self._succeeded += 1
         else:
-            self.report({'INFO'}, f"Exported {succeeded} file(s)")
-        return {'FINISHED'} if succeeded else {'CANCELLED'}
+            self._failed += 1
+        self._job_index += 1
+        completed_label = (
+            f"Completed {self._job_index}/{len(self._jobs)} — "
+            f"{self._succeeded} successful, {self._failed} failed"
+        )
+        self._set_progress(context, self._job_index, completed_label)
+        self._phase = 'ANNOUNCE'
+        return {'RUNNING_MODAL'}
 
 
 def draw_outliner_collection_menu(self, _context):
@@ -434,20 +563,12 @@ def draw_ui(layout, context):
     scene = context.scene
     box = layout.box()
     box.label(text="Collection Batch Export", icon='EXPORT')
-    box.prop(scene, "pm_vr_usdz_export_directory", text="USDZ Directory")
-    box.prop(scene, "pm_vr_glb_export_directory", text="GLB Directory")
+    content = box.column()
+    content.enabled = not scene.pm_vr_export_running
+    content.prop(scene, "pm_vr_usdz_export_directory", text="USDZ Directory")
+    content.prop(scene, "pm_vr_glb_export_directory", text="GLB Directory")
 
-    header = box.row(align=True)
-    for format_name in ('USDZ', 'GLB'):
-        header.label(text=format_name)
-        op = header.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="All")
-        op.export_format = format_name
-        op.enabled = True
-        op = header.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="None")
-        op.export_format = format_name
-        op.enabled = False
-
-    box.template_list(
+    content.template_list(
         PMVR_UL_ExportCollections.__name__,
         "",
         scene,
@@ -457,26 +578,36 @@ def draw_ui(layout, context):
         rows=5,
     )
 
-    controls = box.row(align=True)
+    controls = content.row(align=True)
     controls.operator(PMVR_OT_AddActiveCollection.bl_idname, text="Add Active", icon='ADD')
     controls.operator(PMVR_OT_RemoveExportCollection.bl_idname, text="", icon='REMOVE')
 
-    box.label(text="Outliner: right-click selected collections to add", icon='INFO')
+    content.label(text="Outliner: right-click selected collections to add", icon='INFO')
 
-    exports = box.row(align=True)
-    for format_name in ('USDZ', 'GLB', 'BOTH'):
-        label = "Export Both" if format_name == 'BOTH' else format_name
-        op = exports.operator(PMVR_OT_ExportCollections.bl_idname, text=label, icon='EXPORT')
+    format_columns = content.row(align=True)
+    for format_name in ('USDZ', 'GLB'):
+        column = format_columns.column(align=True)
+        toggles = column.row(align=True)
+        op = toggles.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="All")
+        op.export_format = format_name
+        op.enabled = True
+        op = toggles.operator(PMVR_OT_SetAllExportCollections.bl_idname, text="None")
+        op.export_format = format_name
+        op.enabled = False
+        column.operator_context = 'INVOKE_DEFAULT'
+        op = column.operator(PMVR_OT_ExportCollections.bl_idname, text=format_name, icon='EXPORT')
         op.export_format = format_name
 
-    index = scene.pm_vr_export_collection_index
-    items = scene.pm_vr_export_collections
-    if 0 <= index < len(items):
-        item = items[index]
-        if item.last_usdz_status:
-            box.label(text=f"USDZ: {item.last_usdz_status}")
-        if item.last_glb_status:
-            box.label(text=f"GLB: {item.last_glb_status}")
+    if scene.pm_vr_export_running:
+        progress = box.column(align=True)
+        progress.label(text=scene.pm_vr_export_progress_label, icon='TIME')
+        progress_bar = progress.row()
+        progress_bar.enabled = False
+        progress_bar.prop(scene, "pm_vr_export_progress", text="", slider=True)
+        progress.label(text="Press Esc between files to cancel", icon='INFO')
+    elif scene.pm_vr_export_summary:
+        icon = 'ERROR' if "failed" in scene.pm_vr_export_summary else 'CHECKMARK'
+        box.label(text=scene.pm_vr_export_summary, icon=icon)
 
 
 CLASSES = (
@@ -509,12 +640,41 @@ def register():
         subtype='DIR_PATH',
         default=DEFAULT_GLB_DIRECTORY,
     )
+    bpy.types.Scene.pm_vr_export_running = bpy.props.BoolProperty(
+        name="Export Running",
+        description="Whether a collection batch export is currently running",
+        default=False,
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_export_progress = bpy.props.FloatProperty(
+        name="Export Progress",
+        description="Completed portion of the current collection export batch",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        subtype='FACTOR',
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_export_progress_label = bpy.props.StringProperty(
+        name="Export Progress Status",
+        description="Current collection and format being exported",
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_export_summary = bpy.props.StringProperty(
+        name="Last Export Summary",
+        description="Result of the most recent collection export batch",
+        options={'SKIP_SAVE'},
+    )
     bpy.types.OUTLINER_MT_collection.append(draw_outliner_collection_menu)
 
 
 def unregister():
     bpy.types.OUTLINER_MT_collection.remove(draw_outliner_collection_menu)
     for property_name in (
+        "pm_vr_export_summary",
+        "pm_vr_export_progress_label",
+        "pm_vr_export_progress",
+        "pm_vr_export_running",
         "pm_vr_glb_export_directory",
         "pm_vr_usdz_export_directory",
         "pm_vr_export_collection_index",
