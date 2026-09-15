@@ -13,6 +13,7 @@ TAG_SOURCE = "pm_vr_material_rebuild_source"
 NODE_PRIMARY_UV = "PM VR UVMap"
 NODE_BAKED_UV = "PM VR SimpleBake"
 NODE_BAKED_IMAGE = "PM VR Baked Base Color"
+ALPHA_ONLY_KEYWORDS = ("leaf", "alpha")
 
 
 class MaterialRebuildError(RuntimeError):
@@ -70,6 +71,26 @@ def upstream_image_nodes(input_socket):
     return found
 
 
+def upstream_nodes(input_sockets):
+    found = set()
+
+    def visit_socket(socket):
+        for link in socket.links:
+            node = link.from_node
+            key = node.as_pointer()
+            if key in found:
+                continue
+            found.add(key)
+            for node_input in node.inputs:
+                if node_input.is_linked:
+                    visit_socket(node_input)
+
+    for input_socket in input_sockets:
+        if input_socket.is_linked:
+            visit_socket(input_socket)
+    return found
+
+
 def get_baked_image(material):
     principled = get_single_principled(material, "Baked")
     base_color = principled.inputs.get("Base Color")
@@ -110,28 +131,57 @@ def copy_required_uv_layers(source_mesh, target_mesh):
         layer.active_render = layer.name == BAKED_UV_NAME
 
 
-def configure_material(original_material, baked_image, output_name):
+def configure_material(original_material, baked_image, output_name, alpha_only=False):
     material = original_material.copy()
     material.name = f"{output_name}.__PMVR_NEW__"
     tree = material.node_tree
     principled = get_single_principled(material, "Original")
+
+    base_color = principled.inputs.get("Base Color")
+    if not base_color:
+        raise MaterialRebuildError("Original Principled BSDF has no Base Color input")
+    for link in list(base_color.links):
+        tree.links.remove(link)
+
+    if alpha_only:
+        alpha_input = principled.inputs.get("Alpha")
+        if not alpha_input or not alpha_input.is_linked:
+            raise MaterialRebuildError(
+                "Leaf/Alpha material must have a texture branch connected to Alpha"
+            )
+        for socket in principled.inputs:
+            if socket != alpha_input:
+                for link in list(socket.links):
+                    tree.links.remove(link)
+
+    preserved_node_keys = upstream_nodes(principled.inputs)
+    for node in list(tree.nodes):
+        if (
+            node.type == 'TEX_IMAGE'
+            and node.image
+            and node.as_pointer() not in preserved_node_keys
+        ):
+            tree.nodes.remove(node)
+
     existing_image_nodes = [
         node for node in tree.nodes
         if node.type == 'TEX_IMAGE' and node.image
     ]
 
-    primary_uv = tree.nodes.new("ShaderNodeUVMap")
-    primary_uv.name = NODE_PRIMARY_UV
-    primary_uv.label = PRIMARY_UV_NAME
-    primary_uv.uv_map = PRIMARY_UV_NAME
+    if existing_image_nodes:
+        primary_uv = tree.nodes.new("ShaderNodeUVMap")
+        primary_uv.name = NODE_PRIMARY_UV
+        primary_uv.label = PRIMARY_UV_NAME
+        primary_uv.uv_map = PRIMARY_UV_NAME
 
-    for image_node in existing_image_nodes:
-        vector_input = image_node.inputs.get("Vector")
-        if not vector_input:
-            continue
-        for link in list(vector_input.links):
-            tree.links.remove(link)
-        tree.links.new(primary_uv.outputs["UV"], vector_input)
+        for image_node in existing_image_nodes:
+            vector_input = image_node.inputs.get("Vector")
+            if not vector_input:
+                continue
+            for link in list(vector_input.links):
+                tree.links.remove(link)
+            tree.links.new(primary_uv.outputs["UV"], vector_input)
+        primary_uv.location = (principled.location.x - 900, principled.location.y + 200)
 
     baked_uv = tree.nodes.new("ShaderNodeUVMap")
     baked_uv.name = NODE_BAKED_UV
@@ -145,14 +195,8 @@ def configure_material(original_material, baked_image, output_name):
     baked_texture.interpolation = 'Linear'
     tree.links.new(baked_uv.outputs["UV"], baked_texture.inputs["Vector"])
 
-    base_color = principled.inputs.get("Base Color")
-    if not base_color:
-        raise MaterialRebuildError("Original Principled BSDF has no Base Color input")
-    for link in list(base_color.links):
-        tree.links.remove(link)
     tree.links.new(baked_texture.outputs["Color"], base_color)
 
-    primary_uv.location = (principled.location.x - 900, principled.location.y + 200)
     baked_uv.location = (principled.location.x - 900, principled.location.y - 350)
     baked_texture.location = (principled.location.x - 600, principled.location.y - 350)
     return material
@@ -225,7 +269,13 @@ def rebuild_pair(scene, original, baked):
         new_object.data = new_mesh
 
         copy_required_uv_layers(original.data, new_mesh)
-        new_material = configure_material(original_material, baked_image, output_name)
+        alpha_only = any(keyword in source_name.casefold() for keyword in ALPHA_ONLY_KEYWORDS)
+        new_material = configure_material(
+            original_material,
+            baked_image,
+            output_name,
+            alpha_only=alpha_only,
+        )
         new_mesh.materials.clear()
         new_mesh.materials.append(new_material)
 

@@ -11,7 +11,9 @@ Select matching mesh pairs named `Name` and `Name_Baked`, then run **Prepare
 Baked Material Pairs** in the VR Project section. PM VR creates `Name_M` in the
 Scene Collection, restores `UVMap` and `SimpleBake` from the original mesh, and
 builds a material that uses the baked Base Color on `SimpleBake` while the
-original supporting textures use `UVMap`.
+original supporting textures use `UVMap`. The original Base Color branch is
+discarded. Objects whose names contain `Leaf` or `Alpha` use a restricted mode
+that retains only the original Alpha branch alongside the baked Base Color.
 
 Running the operation again safely replaces only a previous `Name_M` generated
 by PM VR. Untagged name collisions, incompatible topology, ambiguous materials,
