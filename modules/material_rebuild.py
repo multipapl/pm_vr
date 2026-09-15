@@ -319,15 +319,14 @@ def rebuild_pair(scene, original, baked):
 
 def selected_pairs(context):
     selected = [obj for obj in context.selected_objects if obj.type == 'MESH']
-    by_name = {obj.name: obj for obj in selected}
     pairs = []
     unmatched = []
     for baked in selected:
         if not baked.name.endswith(BAKED_SUFFIX):
             continue
         original_name = baked.name[:-len(BAKED_SUFFIX)]
-        original = by_name.get(original_name)
-        if original:
+        original = bpy.data.objects.get(original_name)
+        if original and original.type == 'MESH':
             pairs.append((original, baked))
         else:
             unmatched.append(baked.name)
@@ -338,19 +337,22 @@ class PMVR_OT_RebuildBakedMaterials(bpy.types.Operator):
     bl_idname = "pm_vr.rebuild_baked_materials"
     bl_label = "Prepare Baked Material Pairs"
     bl_description = (
-        "Pair selected Original and Original_Baked meshes, restore UVMap and SimpleBake, "
+        "Find each selected Name_Baked mesh's original by name, restore UVMap and SimpleBake, "
         "then create protected Original_M objects with baked Base Color and original PBR textures"
     )
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
     def poll(cls, context):
-        return len([obj for obj in context.selected_objects if obj.type == 'MESH']) >= 2
+        return any(
+            obj.type == 'MESH' and obj.name.endswith(BAKED_SUFFIX)
+            for obj in context.selected_objects
+        )
 
     def execute(self, context):
         pairs, unmatched = selected_pairs(context)
         if not pairs:
-            self.report({'ERROR'}, 'Select matching "Name" and "Name_Baked" mesh objects')
+            self.report({'ERROR'}, 'Select one or more "Name_Baked" mesh objects')
             return {'CANCELLED'}
 
         succeeded = []
@@ -363,7 +365,7 @@ class PMVR_OT_RebuildBakedMaterials(bpy.types.Operator):
                 print(f'[PM VR][Material Rebuild] Failed "{baked.name}": {exc}')
 
         for name in unmatched:
-            print(f'[PM VR][Material Rebuild] Skipped "{name}": matching original not selected')
+            print(f'[PM VR][Material Rebuild] Skipped "{name}": original object was not found')
 
         skipped_count = len(failed) + len(unmatched)
         if skipped_count:

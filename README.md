@@ -7,13 +7,14 @@ and persistent collection-based batch export to USDZ and GLB.
 
 ## Baked PBR material preparation
 
-Select matching mesh pairs named `Name` and `Name_Baked`, then run **Prepare
-Baked Material Pairs** in the VR Project section. PM VR creates `Name_M` in the
-Scene Collection, restores `UVMap` and `SimpleBake` from the original mesh, and
-builds a material that uses the baked Base Color on `SimpleBake` while the
-original supporting textures use `UVMap`. The original Base Color branch is
-discarded. Objects whose names contain `Leaf` or `Alpha` use a restricted mode
-that retains only the original Alpha branch alongside the baked Base Color.
+Select one or more meshes named `Name_Baked`, then run **Prepare Baked Material
+Pairs** in the VR Project section. PM VR finds each `Name` object globally,
+including in hidden collections, and creates `Name_M` in the Scene Collection.
+It restores `UVMap` and `SimpleBake` from the original mesh and builds a material
+that uses the baked Base Color on `SimpleBake` while the original supporting
+textures use `UVMap`. The original Base Color branch is discarded. Objects whose
+names contain `Leaf` or `Alpha` use a restricted mode that retains only the
+original Alpha branch alongside the baked Base Color.
 Disconnected Base Color, normal, mix, mapping, and other intermediate nodes are
 pruned from the generated material. Source objects, meshes, UVs, materials,
 node graphs, transforms, collection membership, and selection remain unchanged.
