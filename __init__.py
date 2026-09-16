@@ -4,13 +4,14 @@ import importlib
 from .modules import lightmap_baker
 from .modules import collection_export
 from .modules import material_rebuild
+from .modules import pipeline
 from .modules import vr_project_tools
 
 
 bl_info = {
     "name": "PM VR",
     "author": "multipapl",
-    "version": (1, 3, 3),
+    "version": (2, 0, 0),
     "blender": (5, 2, 0),
     "location": "View3D > N-Panel > PM VR",
     "description": "Internal tools for VR project production",
@@ -18,20 +19,22 @@ bl_info = {
 }
 
 
-MODULES = (lightmap_baker, vr_project_tools, material_rebuild, collection_export)
-CATEGORIES = (
-    ("LIGHTMAP_BAKER", "LIGHTMAP BAKER", "show_lightmap_baker", "LIGHTPROBE_SPHERE"),
-    ("VR_PROJECT", "VR PROJECT", "show_vr_project", "WORLD"),
-    ("COLLECTION_EXPORT", "COLLECTION EXPORT", "show_collection_export", "EXPORT"),
-)
+MODULES = (lightmap_baker, vr_project_tools, material_rebuild, collection_export, pipeline)
 
 
 class PMVR_UI_State(bpy.types.PropertyGroup):
-    """Expanded/collapsed state for PM VR sections."""
+    """Active production stage for the PM VR panel."""
 
-    show_lightmap_baker: bpy.props.BoolProperty(name="Lightmap Baker", default=True)
-    show_vr_project: bpy.props.BoolProperty(name="VR Project", default=True)
-    show_collection_export: bpy.props.BoolProperty(name="Collection Export", default=True)
+    stage: bpy.props.EnumProperty(
+        name="Stage",
+        items=(
+            ('OPTIMIZATION', "Optimize", "Manual source-scene optimization tools", 'MODIFIER', 0),
+            ('SETUP', "Setup", "Semantic render layers and bake units", 'PREFERENCES', 1),
+            ('BAKE', "Bake", "Persistent unit queue and Beauty/Lightmap bake", 'RENDER_STILL', 2),
+            ('EXPORT', "Export", "Semantic layer export", 'EXPORT', 3),
+        ),
+        default='OPTIMIZATION',
+    )
 
 
 class PMVR_PT_MainPanel(bpy.types.Panel):
@@ -44,30 +47,14 @@ class PMVR_PT_MainPanel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         ui_state = context.scene.pm_vr_ui_state
+        header = layout.row(align=True)
+        header.prop(ui_state, "stage", expand=True)
+        header.operator("pmvr.project_settings", text="", icon='PREFERENCES')
 
-        for category, title, property_name, icon in CATEGORIES:
-            category_modules = [
-                module for module in MODULES
-                if getattr(module, "UI_CATEGORY", None) == category
-            ]
-            if not category_modules:
-                continue
-
-            is_expanded = getattr(ui_state, property_name)
-            box = layout.box()
-            header = box.row(align=True)
-            header.prop(
-                ui_state,
-                property_name,
-                text="",
-                icon='TRIA_DOWN' if is_expanded else 'TRIA_RIGHT',
-                emboss=False,
-            )
-            header.label(text=title, icon=icon)
-
-            if is_expanded:
-                for module in category_modules:
-                    module.draw_ui(box, context)
+        if ui_state.stage == 'OPTIMIZATION':
+            vr_project_tools.draw_ui(layout, context)
+        else:
+            pipeline.draw_stage(layout, context, ui_state.stage)
 
 
 CLASSES = (PMVR_UI_State, PMVR_PT_MainPanel)

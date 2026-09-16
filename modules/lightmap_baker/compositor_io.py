@@ -83,15 +83,16 @@ def stage_input_image(source, folder, name):
 
 
 @contextmanager
-def temporary_compositor_inputs(image, albedo_guide, normal_guide):
+def temporary_compositor_inputs(image, albedo_guide=None, normal_guide=None):
     with tempfile.TemporaryDirectory(prefix="pm_lightmap_denoise_") as folder:
         images = []
         try:
-            for source, name in (
-                (image, "lightmap"),
-                (albedo_guide, "albedo"),
-                (normal_guide, "normal"),
-            ):
+            sources = [(image, "lightmap")]
+            if albedo_guide is not None:
+                sources.append((albedo_guide, "albedo"))
+            if normal_guide is not None:
+                sources.append((normal_guide, "normal"))
+            for source, name in sources:
                 images.append(stage_input_image(source, folder, name))
             yield folder, images
         finally:

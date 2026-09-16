@@ -102,7 +102,7 @@ def _normal_decode_node(nodes):
     return node
 
 
-def denoise_image(active_scene, image, albedo_guide, normal_guide):
+def denoise_image(active_scene, image, albedo_guide=None, normal_guide=None):
     token = uuid.uuid4().hex
     scene = bpy.data.scenes.new(f"__PM_LM_DENOISE_{token}")
     camera = None
@@ -141,18 +141,20 @@ def denoise_image(active_scene, image, albedo_guide, normal_guide):
                 "Baked Lightmap",
                 (-620.0, 140.0),
             )
-            albedo = _image_node(
-                tree.nodes,
-                input_images[1],
-                "White Receiver Albedo Guide",
-                (-620.0, -40.0),
-            )
-            normal = _image_node(
-                tree.nodes,
-                input_images[2],
-                "Geometry Normal Guide",
-                (-620.0, -220.0),
-            )
+            guided = albedo_guide is not None and normal_guide is not None
+            if guided:
+                albedo = _image_node(
+                    tree.nodes,
+                    input_images[1],
+                    "White Receiver Albedo Guide",
+                    (-620.0, -40.0),
+                )
+                normal = _image_node(
+                    tree.nodes,
+                    input_images[2],
+                    "Geometry Normal Guide",
+                    (-620.0, -220.0),
+                )
             denoise = tree.nodes.new("CompositorNodeDenoise")
             denoise.location = (-220.0, 100.0)
             denoise.label = "PM Lightmap Denoise"
@@ -173,17 +175,18 @@ def denoise_image(active_scene, image, albedo_guide, normal_guide):
                     except (TypeError, ValueError):
                         continue
 
-            normal_decode = _normal_decode_node(tree.nodes)
             tree.links.new(noisy.outputs["Image"], denoise.inputs["Image"])
-            tree.links.new(
-                normal.outputs["Image"],
-                normal_decode.inputs[0],
-            )
-            tree.links.new(
-                normal_decode.outputs["Vector"],
-                denoise.inputs["Normal"],
-            )
-            tree.links.new(albedo.outputs["Image"], denoise.inputs["Albedo"])
+            if guided:
+                normal_decode = _normal_decode_node(tree.nodes)
+                tree.links.new(
+                    normal.outputs["Image"],
+                    normal_decode.inputs[0],
+                )
+                tree.links.new(
+                    normal_decode.outputs["Vector"],
+                    denoise.inputs["Normal"],
+                )
+                tree.links.new(albedo.outputs["Image"], denoise.inputs["Albedo"])
 
             if owns_tree:
                 preview_output = tree.nodes.new("NodeGroupOutput")
@@ -250,6 +253,111 @@ def denoise_image(active_scene, image, albedo_guide, normal_guide):
             finally:
                 bpy.data.images.remove(rendered)
     finally:
+        if scene:
+            scene.camera = None
+        if camera and bpy.data.objects.get(camera.name) is camera:
+            bpy.data.objects.remove(camera, do_unlink=True)
+        if camera_data and camera_data.users == 0:
+            bpy.data.cameras.remove(camera_data)
+        if scene and bpy.data.scenes.get(scene.name) is scene:
+            bpy.data.scenes.remove(scene)
+        if (
+            owns_tree
+            and tree
+            and tree.users == 0
+            and bpy.data.node_groups.get(tree.name) is tree
+        ):
+            bpy.data.node_groups.remove(tree)
+
+
+def denoise_external_beauty(active_scene, image, filepath):
+    """Denoise an already color-managed Beauty PNG like SimpleBake."""
+    token = uuid.uuid4().hex
+    scene = bpy.data.scenes.new(f"__PMVR_BEAUTY_DENOISE_{token}")
+    camera = camera_data = tree = input_image = None
+    owns_tree = False
+    staging = f"{filepath}.pmvr_denoise_tmp.png"
+    try:
+        for engine in (
+            'BLENDER_EEVEE_NEXT',
+            'BLENDER_EEVEE',
+            'BLENDER_WORKBENCH',
+        ):
+            try:
+                scene.render.engine = engine
+                break
+            except (TypeError, ValueError):
+                continue
+        scene.render.resolution_x = image.size[0]
+        scene.render.resolution_y = image.size[1]
+        scene.render.resolution_percentage = 100
+        scene.render.film_transparent = False
+        scene.render.image_settings.file_format = 'PNG'
+        scene.render.image_settings.color_mode = 'RGB'
+        scene.render.image_settings.color_depth = '8'
+        scene.render.use_compositing = True
+        scene.render.use_sequencer = False
+        scene.view_settings.view_transform = 'Standard'
+        try:
+            scene.view_settings.look = 'None'
+        except (TypeError, ValueError):
+            pass
+        scene.view_settings.exposure = 0.0
+        scene.view_settings.gamma = 1.0
+        try:
+            scene.display_settings.display_device = (
+                active_scene.display_settings.display_device
+            )
+        except (AttributeError, TypeError, ValueError):
+            pass
+        camera, camera_data = _create_camera(scene, token)
+        tree, owns_tree = _compositor_tree(scene)
+        tree.nodes.clear()
+
+        input_image = bpy.data.images.load(filepath, check_existing=False)
+        noisy = _image_node(
+            tree.nodes,
+            input_image,
+            "Color-managed Beauty",
+            (-420.0, 80.0),
+        )
+        denoise = tree.nodes.new("CompositorNodeDenoise")
+        denoise.location = (-120.0, 80.0)
+        denoise.label = "PMVR Beauty Denoise"
+        if hasattr(denoise, "use_hdr"):
+            denoise.use_hdr = True
+        if hasattr(denoise, "prefilter"):
+            try:
+                denoise.prefilter = 'NONE'
+            except (TypeError, ValueError):
+                pass
+        tree.links.new(noisy.outputs["Image"], denoise.inputs["Image"])
+        output = (
+            tree.nodes.new("NodeGroupOutput")
+            if owns_tree
+            else tree.nodes.new("CompositorNodeComposite")
+        )
+        output.location = (160.0, 80.0)
+        tree.links.new(denoise.outputs["Image"], output.inputs["Image"])
+
+        result = bpy.ops.render.render(
+            scene=scene.name,
+            use_viewport=False,
+            write_still=False,
+        )
+        if 'FINISHED' not in result:
+            raise RuntimeError("Beauty compositor denoise was cancelled")
+        render_result = bpy.data.images.get("Render Result")
+        if not render_result:
+            raise RuntimeError("Beauty compositor produced no Render Result")
+        render_result.save_render(staging, scene=scene)
+        os.replace(staging, filepath)
+        image.reload()
+    finally:
+        if os.path.exists(staging):
+            os.remove(staging)
+        if input_image and bpy.data.images.get(input_image.name) is input_image:
+            bpy.data.images.remove(input_image)
         if scene:
             scene.camera = None
         if camera and bpy.data.objects.get(camera.name) is camera:

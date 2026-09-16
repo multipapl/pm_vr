@@ -179,11 +179,17 @@ class ViewportProgressOverlay:
         gpu.state.blend_set('NONE')
 
         elapsed = max(0.0, time.monotonic() - feedback.started_at)
+        if elapsed >= 60.0:
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            elapsed_label = f"{minutes}m {seconds:02d}s"
+        else:
+            elapsed_label = f"{elapsed:.0f}s"
         _font_size(font_id, 16)
         _draw_text(
             font_id,
-            f"PM LIGHTMAP BAKER   {feedback.percent:.0f}%"
-            f"   {elapsed:.0f}s",
+            f"{getattr(feedback, 'title', 'PM LIGHTMAP BAKER')}   "
+            f"{feedback.percent:.0f}%   {elapsed_label}",
             text_x,
             top - 28,
             (0.92, 0.95, 1.0, 1.0),

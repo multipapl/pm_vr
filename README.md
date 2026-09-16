@@ -1,41 +1,68 @@
 # PM VR
 
-A collection of internal tools for working on VR projects in Blender.
+A production pipeline addon for preparing, baking, previewing, and exporting
+Apple Vision Pro scenes from Blender 5.2.
 
-The addon currently includes VR project preparation tools, a lightmap baking workflow,
-and persistent collection-based batch export to USDZ and GLB.
+The View3D sidebar is organized as four stages:
 
-## Baked PBR material preparation
+1. **Optimize** — the existing manual audit, naming, UV, texel-density, relink,
+   and texture tools.
+2. **Setup** — semantic render layers, layer-filtered bake units, per-unit
+   resolution, and Day/Evening lighting configuration.
+3. **Bake** — a persistent bake-unit queue with Beauty/Lightmap mode selection.
+4. **Export** — checked semantic layers assembled from generated Beauty objects
+   plus untouched Export Original objects and exported to USDZ/GLB.
 
-Select one or more meshes named `Name_Baked`, then run **Prepare Baked Material
-Pairs** in the VR Project section. PM VR finds each `Name` object globally,
-including in hidden collections, and creates `Name_M` in the Scene Collection.
-It restores `UVMap` and `SimpleBake` from the original mesh and builds a material
-that uses the baked Base Color on `SimpleBake` while the original supporting
-textures use `UVMap`. The original Base Color branch is discarded. Objects whose
-names contain `Leaf` or `Alpha` use a restricted mode that retains only the
-original Alpha branch alongside the baked Base Color.
-Disconnected Base Color, normal, mix, mapping, and other intermediate nodes are
-pruned from the generated material. Source objects, meshes, UVs, materials,
-node graphs, transforms, collection membership, and selection remain unchanged.
+Global source-root, lighting collections, worlds, bake defaults, and output
+directories live in **Project Settings** (the gear button in the panel header).
 
-Running the operation again safely replaces only a previous `Name_M` generated
-by PM VR. Untagged name collisions, incompatible topology, ambiguous materials,
-and missing textures are skipped and reported without overwriting user data.
+## Production Beauty workflow
 
-## Collection batch export
+Initialize the project, configure Source Root plus Day/Evening collections and
+worlds, then create semantic render layers. A render layer's name is also its
+export filename stem. Assign non-baked geometry and empties as `Export Original`.
 
-Select collections in Blender's Outliner and use **Add to PM VR Export List** from
-the collection context menu. Each row is stored in the `.blend` file. Its output
-name starts as the collection name and can be edited permanently in the list.
+With a render layer active, click `+` to turn every selected mesh into a separate
+bake unit; Shift-click `+` to create one shared-atlas unit from the selection.
+The unit list shows only the active layer. Checkbox-select multiple rows with
+Shift and changing one selected resolution applies it to that batch only. Select
+any unit member and use **Add Selected Units** in Bake—the complete unit is queued
+and duplicates are ignored.
 
-USDZ and GLB use separate export directories and independent checkboxes. Use the
-format buttons to create one file per checked collection. USDZ uses the PM VR
-Apple Vision Pro preset; GLB uses WebP textures at quality 75 and Draco mesh
-compression with the project preset.
+New units receive an initial 1K/2K/4K/8K resolution suggestion from the
+`SimpleBake` UV channel and the project texel-density target. Missing or invalid
+second UV channels safely fall back to the configured default resolution. The
+Bake stage provides queue-wide `÷2` and `×2` controls for quick test passes.
 
-Interactive exports show the current collection, format, completed job count,
-and a progress indicator. A persistent summary is shown when the batch finishes.
+Beauty bake uses Cycles Combined at 256 samples by default, shared image targets,
+SimpleBake-style image-only compositor denoise, and a single PNG atlas per unit/state.
+Day and Evening may be checked together and are processed sequentially. Source objects,
+mesh geometry, materials, UV coordinates, modifiers, and collection membership are never edited.
+The first UV channel is activated for baking as a safety measure; authored UV data is unchanged.
+Generated objects remain separate and are owned through stable IDs rather than names.
+
+The processors are:
+
+- `Scene / Beauty`: baked Base Color on `SimpleBake` in a simple Principled material;
+- `PBR / Beauty`: baked Base Color plus original Metallic/Roughness/Normal on `UVMap`;
+- `Translucent / Beauty`: baked Base Color plus original Alpha on `UVMap`;
+- `Export Original`: no generated copy.
+
+Day uses the base output filename; Evening adds `_Evening`. Export is blocked when
+the current state has no compatible Beauty artifact.
+
+Lightmap uses the same unit queue and shared atlas, but produces separate
+scene-linear EXR images and generated objects/materials. Switching modes never
+overwrites the other mode's artifacts.
+
+## Legacy tools
+
+The original Lightmap Baker, material-pair rebuild operator, and collection
+exporter remain registered as backend and compatibility code, but are hidden
+from the main production interface.
+
+The complete design and implementation contract is in
+[`docs/PIPELINE_IMPLEMENTATION_PLAN.md`](docs/PIPELINE_IMPLEMENTATION_PLAN.md).
 
 ## Installation
 

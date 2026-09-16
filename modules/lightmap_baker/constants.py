@@ -1,6 +1,6 @@
 """Shared constants for PM Lightmap Baker."""
 
-UI_CATEGORY = "LIGHTMAP_BAKER"
+UI_CATEGORY = "LEGACY_LIGHTMAP"
 
 BAKER_VERSION = 1
 BAKE_UV_NAME = "SimpleBake"

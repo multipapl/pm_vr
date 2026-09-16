@@ -51,8 +51,9 @@ def _ensure_cleanup_timer():
 class BakeProgressFeedback:
     """Mutable UI state owned by one foreground batch."""
 
-    def __init__(self, context):
+    def __init__(self, context, title="PM LIGHTMAP BAKER"):
         self.enabled = not bpy.app.background
+        self.title = title
         self.messages = []
         self.percent = 0.0
         self.object_name = ""

@@ -6,8 +6,9 @@ import shutil
 import bpy
 
 from ..selection_targets import get_selected_target_objects
+from . import viewport_notice
 
-UI_CATEGORY = "VR_PROJECT"
+UI_CATEGORY = "OPTIMIZATION"
 
 PRIMARY_UV_NAME = "UVMap"
 SIMPLE_BAKE_UV_NAME = "SimpleBake"
@@ -27,12 +28,30 @@ TEXTURE_FILE_EXTENSIONS = (
 BLENDER_DUPLICATE_SUFFIX_PATTERN = re.compile(r"^(.*)\.(\d{3})$")
 PASCAL_CASE_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 
+AUDIT_ISSUE_BITS = {
+    "bad_object_names": 1 << 0,
+    "shared_mesh_data": 1 << 1,
+    "mesh_name_mismatch": 1 << 2,
+    "material_count": 1 << 3,
+    "material_name_mismatch": 1 << 4,
+    "shared_materials": 1 << 5,
+    "uv_channels": 1 << 6,
+}
+
 
 def iter_scope_objects(context, scope):
-    if scope == 'SELECTED':
-        return [obj for obj in get_selected_target_objects(context) if obj.type == 'MESH']
+    def is_source_mesh(obj):
+        return bool(
+            obj.type == 'MESH'
+            and not obj.get("pmvr_generated")
+            and not obj.get("pm_lightmap_generated")
+            and not obj.get("pm_vr_material_rebuild_generated")
+        )
 
-    return [obj for obj in bpy.data.objects if obj.type == 'MESH']
+    if scope == 'SELECTED':
+        return [obj for obj in get_selected_target_objects(context) if is_source_mesh(obj)]
+
+    return [obj for obj in context.scene.objects if is_source_mesh(obj)]
 
 
 def count_material_object_users(material):
@@ -370,8 +389,10 @@ def sync_names_from_objects(objects):
     }
 
 
-def ensure_uv_channels(mesh):
+def fix_uv_channels(mesh):
+    """Ensure the first two UV names, copying UV data only when channel two is new."""
     layers = mesh.uv_layers
+    created_second = False
     if len(layers) == 0:
         primary = layers.new(name=PRIMARY_UV_NAME, do_init=True)
     else:
@@ -379,27 +400,35 @@ def ensure_uv_channels(mesh):
 
     if len(layers) == 1:
         simple_bake = layers.new(name=SIMPLE_BAKE_UV_NAME, do_init=True)
+        created_second = True
     else:
         simple_bake = layers[1]
 
-    for index in reversed(range(2, len(layers))):
-        layers.remove(layers[index])
+    # Free the two reserved convention names without deleting or reordering any
+    # additional UV layers.
+    for index, layer in enumerate(layers):
+        if layer not in (primary, simple_bake) and layer.name in {
+            PRIMARY_UV_NAME,
+            SIMPLE_BAKE_UV_NAME,
+        }:
+            layer.name = f"{layer.name}_Extra_{index + 1}"
 
     primary.name = "__PM_TMP_PRIMARY_UV__"
     simple_bake.name = "__PM_TMP_SIMPLE_BAKE_UV__"
     primary.name = PRIMARY_UV_NAME
     simple_bake.name = SIMPLE_BAKE_UV_NAME
 
-    for source_data, target_data in zip(primary.data, simple_bake.data):
-        target_data.uv = source_data.uv
+    if created_second:
+        for source_data, target_data in zip(primary.data, simple_bake.data):
+            target_data.uv = source_data.uv
 
-    layers.active = primary
-    for layer in layers:
-        layer.active_render = layer == simple_bake
+        layers.active = primary
+        for layer in layers:
+            layer.active_render = layer == simple_bake
     return primary, simple_bake
 
 
-def ensure_uv_channels_for_objects(objects):
+def fix_uv_channels_for_objects(objects):
     checked = 0
     changed_meshes = 0
     seen_meshes = set()
@@ -415,13 +444,96 @@ def ensure_uv_channels_for_objects(objects):
         seen_meshes.add(mesh_key)
 
         before = [layer.name for layer in mesh.uv_layers]
-        ensure_uv_channels(mesh)
+        fix_uv_channels(mesh)
         after = [layer.name for layer in mesh.uv_layers]
         checked += 1
         if before != after:
             changed_meshes += 1
 
     return checked, changed_meshes
+
+
+def ensure_uv_channels(mesh):
+    """Compatibility alias for scripts using the former mutating helper."""
+    return fix_uv_channels(mesh)
+
+
+def ensure_uv_channels_for_objects(objects):
+    """Compatibility alias for the former mutating operator backend."""
+    return fix_uv_channels_for_objects(objects)
+
+
+def has_valid_uv_channels(mesh):
+    layers = mesh.uv_layers if mesh else ()
+    return bool(
+        len(layers) >= 2
+        and layers[0].name == PRIMARY_UV_NAME
+        and layers[1].name == SIMPLE_BAKE_UV_NAME
+    )
+
+
+def objects_with_invalid_uv_channels(objects):
+    return [obj for obj in objects if not has_valid_uv_channels(obj.data)]
+
+
+def audit_issue_keys(obj):
+    issues = []
+    if not is_pascal_case_name(obj.name) or BLENDER_DUPLICATE_SUFFIX_PATTERN.match(obj.name):
+        issues.append("bad_object_names")
+    if obj.data and obj.data.users > 1:
+        issues.append("shared_mesh_data")
+    if obj.data and obj.data.name != obj.name:
+        issues.append("mesh_name_mismatch")
+
+    materials = get_non_empty_materials(obj)
+    if len(materials) != 1 or any(slot.material is None for slot in obj.material_slots):
+        issues.append("material_count")
+    else:
+        material = materials[0]
+        if material.name != obj.name:
+            issues.append("material_name_mismatch")
+        if count_material_object_users(material) > 1:
+            issues.append("shared_materials")
+    if obj.data and not has_valid_uv_channels(obj.data):
+        issues.append("uv_channels")
+    return issues
+
+
+def audit_flags(obj):
+    return sum(AUDIT_ISSUE_BITS[key] for key in audit_issue_keys(obj))
+
+
+def audit_issue_count(flags):
+    return sum(bool(flags & bit) for bit in AUDIT_ISSUE_BITS.values())
+
+
+def audit_issue_details(obj, flags):
+    details = []
+    if flags & AUDIT_ISSUE_BITS["bad_object_names"]:
+        details.append("Object name must be PascalCase without a .001 suffix")
+    if flags & AUDIT_ISSUE_BITS["shared_mesh_data"]:
+        details.append(f'Mesh data is shared by {obj.data.users} objects')
+    if flags & AUDIT_ISSUE_BITS["mesh_name_mismatch"]:
+        details.append(f'Mesh is "{obj.data.name}"; expected "{obj.name}"')
+    if flags & AUDIT_ISSUE_BITS["material_count"]:
+        non_empty = len(get_non_empty_materials(obj))
+        details.append(f"Expected one material; found {non_empty}")
+    if flags & AUDIT_ISSUE_BITS["material_name_mismatch"]:
+        material = get_non_empty_materials(obj)[0]
+        details.append(f'Material is "{material.name}"; expected "{obj.name}"')
+    if flags & AUDIT_ISSUE_BITS["shared_materials"]:
+        material = get_non_empty_materials(obj)[0]
+        details.append(
+            f'Material "{material.name}" is shared by '
+            f'{count_material_object_users(material)} objects'
+        )
+    if flags & AUDIT_ISSUE_BITS["uv_channels"]:
+        names = [layer.name for layer in obj.data.uv_layers]
+        current = ", ".join(names[:3]) if names else "none"
+        if len(names) > 3:
+            current += ", ..."
+        details.append(f'UV channels are [{current}]; expected UVMap, SimpleBake')
+    return details
 
 
 def audit_objects(objects):
@@ -436,31 +548,119 @@ def audit_objects(objects):
     }
 
     for obj in objects:
-        if not is_pascal_case_name(obj.name) or BLENDER_DUPLICATE_SUFFIX_PATTERN.match(obj.name):
-            issues["bad_object_names"].append(obj.name)
-
-        if obj.data and obj.data.users > 1:
-            issues["shared_mesh_data"].append(obj.name)
-
-        if obj.data and obj.data.name != obj.name:
-            issues["mesh_name_mismatch"].append(obj.name)
-
-        materials = get_non_empty_materials(obj)
-        if len(materials) != 1 or any(slot.material is None for slot in obj.material_slots):
-            issues["material_count"].append(obj.name)
-        else:
-            material = materials[0]
-            if material.name != obj.name:
-                issues["material_name_mismatch"].append(obj.name)
-            if count_material_object_users(material) > 1:
-                issues["shared_materials"].append(obj.name)
-
-        if obj.data:
-            uv_names = [layer.name for layer in obj.data.uv_layers]
-            if uv_names != [PRIMARY_UV_NAME, SIMPLE_BAKE_UV_NAME]:
-                issues["uv_channels"].append(obj.name)
+        for issue_key in audit_issue_keys(obj):
+            issues[issue_key].append(obj.name)
 
     return issues
+
+
+class PMVR_AuditResultItem(bpy.types.PropertyGroup):
+    object: bpy.props.PointerProperty(type=bpy.types.Object)  # type: ignore[reportInvalidTypeForm]
+    issue_flags: bpy.props.IntProperty(default=0)  # type: ignore[reportInvalidTypeForm]
+
+
+def _prune_missing_audit_results(scene):
+    for index in reversed(range(len(scene.pm_vr_audit_results))):
+        if scene.pm_vr_audit_results[index].object is None:
+            scene.pm_vr_audit_results.remove(index)
+    scene.pm_vr_audit_index = min(
+        scene.pm_vr_audit_index,
+        max(0, len(scene.pm_vr_audit_results) - 1),
+    )
+
+
+def _active_audit_result(scene):
+    _prune_missing_audit_results(scene)
+    if not scene.pm_vr_audit_results:
+        return None
+    return scene.pm_vr_audit_results[scene.pm_vr_audit_index]
+
+
+def _recount_audit_issues(scene):
+    scene.pm_vr_audit_issue_count = sum(
+        audit_issue_count(item.issue_flags)
+        for item in scene.pm_vr_audit_results
+    )
+
+
+def _select_only_audit_object(context, obj):
+    if obj is None or context.view_layer.objects.get(obj.name) is not obj:
+        return False
+    if context.mode != 'OBJECT':
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except Exception:
+            pass
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    context.view_layer.objects.active = obj
+    return True
+
+
+def _store_audit_results(scene, objects, scope_label):
+    scene.pm_vr_audit_results.clear()
+    scene.pm_vr_audit_checked_count = len(objects)
+    scene.pm_vr_audit_scope_label = scope_label
+    for obj in objects:
+        flags = audit_flags(obj)
+        if not flags:
+            continue
+        item = scene.pm_vr_audit_results.add()
+        item.object = obj
+        item.issue_flags = flags
+    scene.pm_vr_audit_index = 0
+    _recount_audit_issues(scene)
+
+
+def _audit_group_counts(scene):
+    naming_bits = (
+        AUDIT_ISSUE_BITS["bad_object_names"]
+        | AUDIT_ISSUE_BITS["mesh_name_mismatch"]
+        | AUDIT_ISSUE_BITS["material_name_mismatch"]
+    )
+    data_bits = (
+        AUDIT_ISSUE_BITS["shared_mesh_data"]
+        | AUDIT_ISSUE_BITS["material_count"]
+        | AUDIT_ISSUE_BITS["shared_materials"]
+    )
+    uv_bit = AUDIT_ISSUE_BITS["uv_channels"]
+    counts = {"Naming": 0, "Materials / Data": 0, "UV Channels": 0}
+    for item in scene.pm_vr_audit_results:
+        counts["Naming"] += audit_issue_count(item.issue_flags & naming_bits)
+        counts["Materials / Data"] += audit_issue_count(item.issue_flags & data_bits)
+        counts["UV Channels"] += audit_issue_count(item.issue_flags & uv_bit)
+    return counts
+
+
+def _show_audit_summary(scene, first_selected=False):
+    problem_count = len(scene.pm_vr_audit_results)
+    issue_count = scene.pm_vr_audit_issue_count
+    if not problem_count:
+        viewport_notice.show(
+            "PM VR AUDIT",
+            f"Checked {scene.pm_vr_audit_checked_count} object(s)",
+            (("INFO", "No problems found"),),
+            level='SUCCESS',
+        )
+        return
+    counts = _audit_group_counts(scene)
+    category_line = "  ·  ".join(
+        f"{name}: {count}" for name, count in counts.items() if count
+    )
+    viewport_notice.show(
+        "PM VR AUDIT",
+        f"{scene.pm_vr_audit_checked_count} checked  ·  {problem_count} problem objects  ·  {issue_count} issues",
+        (
+            ("WARNING", category_line),
+            (
+                "STATUS",
+                "First problem selected — fix it, then Recheck & Next"
+                if first_selected
+                else "Problems found outside the active View Layer",
+            ),
+        ),
+        level='WARNING',
+    )
 
 
 def get_objects_from_issue_names(issue_names):
@@ -508,14 +708,14 @@ def format_issue_sample(names):
 class PM_OT_VR_AuditObjectPrep(bpy.types.Operator):
     bl_idname = "pm_vr.audit_object_prep"
     bl_label = "Audit Object Prep"
-    bl_description = "Check object-based Scale Immersive naming, material, and UV requirements"
+    bl_description = "Check the current object naming, material, and UV preparation rules"
     bl_options = {'REGISTER'}
 
     scope: bpy.props.EnumProperty(  # type: ignore[reportInvalidTypeForm]
         name="Scope",
         items=(
             ('SELECTED', "Selected", "Only selected mesh targets"),
-            ('ALL', "All Meshes", "All mesh objects in the file"),
+            ('ALL', "Scene", "All source mesh objects in the current scene"),
         ),
         default='ALL',
     )
@@ -524,22 +724,157 @@ class PM_OT_VR_AuditObjectPrep(bpy.types.Operator):
         objects = iter_scope_objects(context, self.scope)
         if not objects:
             self.report({'WARNING'}, "No mesh objects found in scope")
+            viewport_notice.show(
+                "PM VR AUDIT",
+                "Nothing to check",
+                (("WARNING", "Select one or more mesh objects"),),
+                level='WARNING',
+            )
             return {'CANCELLED'}
 
-        issues = audit_objects(objects)
-        total_issues = sum(len(names) for names in issues.values())
-        if total_issues == 0:
+        scene = context.scene
+        scope_label = "Selected" if self.scope == 'SELECTED' else "Scene"
+        _store_audit_results(scene, objects, scope_label)
+        if not scene.pm_vr_audit_results:
+            _show_audit_summary(scene)
             self.report({'INFO'}, f"Audit passed for {len(objects)} object(s)")
             return {'FINISHED'}
 
-        print("[PM VR][VR Project] Scale Immersive audit:")
-        for issue_name, names in issues.items():
-            if names:
-                print(f"  {issue_name}: {len(names)} ({format_issue_sample(names)})")
+        selected = False
+        for index, result in enumerate(scene.pm_vr_audit_results):
+            if _select_only_audit_object(context, result.object):
+                scene.pm_vr_audit_index = index
+                selected = True
+                break
+        _show_audit_summary(scene, first_selected=selected)
+        hidden_note = " First problem is outside the active View Layer." if not selected else ""
+        self.report(
+            {'WARNING'},
+            f"Audit found {scene.pm_vr_audit_issue_count} issue(s) on "
+            f"{len(scene.pm_vr_audit_results)} object(s).{hidden_note}",
+        )
+        return {'FINISHED'}
 
-        selected, hidden = select_scene_objects(context, get_problem_objects(issues))
-        hidden_note = f", {hidden} not visible in current view layer" if hidden else ""
-        self.report({'WARNING'}, f"Audit found {total_issues} issue(s); selected {selected} object(s){hidden_note}")
+
+class PM_OT_VR_AuditNavigate(bpy.types.Operator):
+    bl_idname = "pm_vr.audit_navigate"
+    bl_label = "Previous/Next Audit Problem"
+
+    direction: bpy.props.EnumProperty(  # type: ignore[reportInvalidTypeForm]
+        items=(('PREVIOUS', "Previous", ""), ('NEXT', "Next", "")),
+        default='NEXT',
+    )
+
+    def execute(self, context):
+        scene = context.scene
+        _prune_missing_audit_results(scene)
+        count = len(scene.pm_vr_audit_results)
+        if not count:
+            return {'CANCELLED'}
+        offset = -1 if self.direction == 'PREVIOUS' else 1
+        scene.pm_vr_audit_index = (scene.pm_vr_audit_index + offset) % count
+        item = scene.pm_vr_audit_results[scene.pm_vr_audit_index]
+        if not _select_only_audit_object(context, item.object):
+            self.report({'WARNING'}, "Object is outside the active View Layer")
+        return {'FINISHED'}
+
+
+class PM_OT_VR_AuditSelectActive(bpy.types.Operator):
+    bl_idname = "pm_vr.audit_select_active"
+    bl_label = "Select Audit Object"
+
+    def execute(self, context):
+        item = _active_audit_result(context.scene)
+        if not item or not _select_only_audit_object(context, item.object):
+            self.report({'WARNING'}, "Audit object is unavailable in the active View Layer")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+class PM_OT_VR_AuditSelectAll(bpy.types.Operator):
+    bl_idname = "pm_vr.audit_select_all"
+    bl_label = "Select All Problems"
+
+    def execute(self, context):
+        scene = context.scene
+        _prune_missing_audit_results(scene)
+        objects = [item.object for item in scene.pm_vr_audit_results if item.object]
+        selected, hidden = select_scene_objects(context, objects)
+        item = _active_audit_result(scene)
+        if item and item.object and context.view_layer.objects.get(item.object.name) is item.object:
+            context.view_layer.objects.active = item.object
+        message = f"Selected {selected} problem object(s)"
+        if hidden:
+            message += f", {hidden} outside the active View Layer"
+        self.report({'WARNING'} if hidden else {'INFO'}, message)
+        return {'FINISHED'} if selected else {'CANCELLED'}
+
+
+class PM_OT_VR_AuditRecheckActive(bpy.types.Operator):
+    bl_idname = "pm_vr.audit_recheck_active"
+    bl_label = "Recheck & Next"
+    bl_description = "Recheck only the current audit object; remove it and advance when clean"
+
+    def execute(self, context):
+        scene = context.scene
+        item = _active_audit_result(scene)
+        if not item:
+            return {'CANCELLED'}
+        obj = item.object
+        index = scene.pm_vr_audit_index
+        if obj is None:
+            scene.pm_vr_audit_results.remove(index)
+        else:
+            flags = audit_flags(obj)
+            if flags:
+                item.issue_flags = flags
+                _recount_audit_issues(scene)
+                remaining = audit_issue_count(flags)
+                _select_only_audit_object(context, obj)
+                viewport_notice.show(
+                    "PM VR AUDIT",
+                    f"{obj.name} still has {remaining} issue(s)",
+                    tuple(("WARNING", text) for text in audit_issue_details(obj, flags)[:4]),
+                    level='WARNING',
+                )
+                self.report({'WARNING'}, f"{obj.name}: {remaining} issue(s) remain")
+                return {'FINISHED'}
+            scene.pm_vr_audit_results.remove(index)
+
+        scene.pm_vr_audit_index = min(index, max(0, len(scene.pm_vr_audit_results) - 1))
+        _recount_audit_issues(scene)
+        if not scene.pm_vr_audit_results:
+            viewport_notice.show(
+                "PM VR AUDIT",
+                "All audited problems are resolved",
+                (("INFO", "The working stack is empty"),),
+                level='SUCCESS',
+            )
+            self.report({'INFO'}, "All audited problems are resolved")
+            return {'FINISHED'}
+
+        next_item = scene.pm_vr_audit_results[scene.pm_vr_audit_index]
+        _select_only_audit_object(context, next_item.object)
+        viewport_notice.show(
+            "PM VR AUDIT",
+            f"Fixed — {len(scene.pm_vr_audit_results)} problem object(s) remain",
+            (("STATUS", f"Next: {next_item.object.name}"),),
+            level='SUCCESS',
+        )
+        return {'FINISHED'}
+
+
+class PM_OT_VR_AuditClear(bpy.types.Operator):
+    bl_idname = "pm_vr.audit_clear"
+    bl_label = "Clear Audit Results"
+
+    def execute(self, context):
+        scene = context.scene
+        scene.pm_vr_audit_results.clear()
+        scene.pm_vr_audit_index = 0
+        scene.pm_vr_audit_checked_count = 0
+        scene.pm_vr_audit_issue_count = 0
+        scene.pm_vr_audit_scope_label = ""
         return {'FINISHED'}
 
 
@@ -553,7 +888,7 @@ class PM_OT_VR_SyncNamesFromObjects(bpy.types.Operator):
         name="Scope",
         items=(
             ('SELECTED', "Selected", "Only selected mesh targets"),
-            ('ALL', "All Meshes", "All mesh objects in the file"),
+            ('ALL', "Scene", "All source mesh objects in the current scene"),
         ),
         default='ALL',
     )
@@ -589,16 +924,16 @@ class PM_OT_VR_SyncNamesFromObjects(bpy.types.Operator):
 
 
 class PM_OT_VR_CheckUVChannels(bpy.types.Operator):
-    bl_idname = "pm_vr.ensure_uv_channels"
+    bl_idname = "pm_vr.check_uv_channels"
     bl_label = "Check UV Channels"
-    bl_description = "Force exact UVMap and SimpleBake channels, copying UVMap coordinates to SimpleBake"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Select only objects whose first two UV channels are not UVMap and SimpleBake; change no data"
+    bl_options = {'REGISTER'}
 
     scope: bpy.props.EnumProperty(  # type: ignore[reportInvalidTypeForm]
         name="Scope",
         items=(
             ('SELECTED', "Selected", "Only selected mesh targets"),
-            ('ALL', "All Meshes", "All mesh objects in the file"),
+            ('ALL', "Scene", "All source mesh objects in the current scene"),
         ),
         default='ALL',
     )
@@ -609,8 +944,68 @@ class PM_OT_VR_CheckUVChannels(bpy.types.Operator):
             self.report({'WARNING'}, "No mesh objects found in scope")
             return {'CANCELLED'}
 
-        checked, changed = ensure_uv_channels_for_objects(objects)
-        self.report({'INFO'}, f"UV channels ready: processed {checked}, renamed/trimmed {changed} mesh data-block(s)")
+        invalid = objects_with_invalid_uv_channels(objects)
+        selected, hidden = select_scene_objects(context, invalid)
+        if not invalid:
+            self.report({'INFO'}, f"UV check passed for {len(objects)} object(s)")
+            return {'FINISHED'}
+        hidden_note = f", {hidden} not visible in current view layer" if hidden else ""
+        self.report(
+            {'WARNING'},
+            f"Found {len(invalid)} object(s) with invalid UV channels; selected {selected}{hidden_note}",
+        )
+        return {'FINISHED'}
+
+
+class PM_OT_VR_FixUVChannels(bpy.types.Operator):
+    bl_idname = "pm_vr.fix_uv_channels"
+    bl_label = "Fix UV Channels"
+    bl_description = (
+        "Rename the first two UV channels to UVMap and SimpleBake; create and copy "
+        "UVMap only when the second channel does not exist"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    scope: bpy.props.EnumProperty(  # type: ignore[reportInvalidTypeForm]
+        name="Scope",
+        items=(
+            ('SELECTED', "Selected", "Only selected mesh targets"),
+            ('ALL', "Scene", "All source mesh objects in the current scene"),
+        ),
+        default='ALL',
+    )
+
+    def execute(self, context):
+        objects = iter_scope_objects(context, self.scope)
+        if not objects:
+            self.report({'WARNING'}, "No mesh objects found in scope")
+            return {'CANCELLED'}
+
+        checked, changed = fix_uv_channels_for_objects(objects)
+        self.report(
+            {'INFO'},
+            f"UV channels fixed: processed {checked}, changed {changed} mesh data-block(s)",
+        )
+        return {'FINISHED'}
+
+
+class PM_OT_VR_EnsureUVChannelsCompatibility(bpy.types.Operator):
+    """Hidden compatibility endpoint for old scripts and saved operator searches."""
+
+    bl_idname = "pm_vr.ensure_uv_channels"
+    bl_label = "Fix UV Channels (Legacy ID)"
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    scope: bpy.props.EnumProperty(  # type: ignore[reportInvalidTypeForm]
+        items=(('SELECTED', "Selected", ""), ('ALL', "Scene", "")),
+        default='ALL',
+    )
+
+    def execute(self, context):
+        objects = iter_scope_objects(context, self.scope)
+        if not objects:
+            return {'CANCELLED'}
+        fix_uv_channels_for_objects(objects)
         return {'FINISHED'}
 
 
@@ -923,7 +1318,7 @@ def get_mesh_areas(obj):
 
         world_area_bu2 = 0.0
         uv_area = 0.0
-        mw = obj.matrix_world
+        mw = obj_eval.matrix_world
 
         for poly in mesh.polygons:
             loop_indices = poly.loop_indices
@@ -943,7 +1338,12 @@ def get_mesh_areas(obj):
             uvs = [uv_layer.data[i].uv.copy() for i in loop_indices]
             uv_area += polygon_area_2d(uvs)
 
-        mesh_area_cm2 = world_area_bu2 * (CM_PER_BLEND_UNIT ** 2)
+        scene_scale = max(
+            1.0e-9,
+            float(bpy.context.scene.unit_settings.scale_length),
+        )
+        cm_per_blend_unit = CM_PER_BLEND_UNIT * scene_scale
+        mesh_area_cm2 = world_area_bu2 * (cm_per_blend_unit ** 2)
         return mesh_area_cm2, uv_area, None
     finally:
         obj_eval.to_mesh_clear()
@@ -1127,24 +1527,71 @@ class PM_OT_VR_ActivateSimpleBake(bpy.types.Operator):
 
 def draw_ui(layout, context):
     box = layout.box()
-    box.label(text="Scale Immersive Prep", icon='WORLD')
+    scene = context.scene
 
-    audit_col = box.column(align=True)
-    op = audit_col.operator(PM_OT_VR_AuditObjectPrep.bl_idname, text="Audit Selected", icon='CHECKMARK')
+    audit_row = box.row(align=True)
+    op = audit_row.operator(
+        PM_OT_VR_AuditObjectPrep.bl_idname,
+        text="Audit Selected",
+        icon='CHECKMARK',
+    )
     op.scope = 'SELECTED'
+    op = audit_row.operator(
+        PM_OT_VR_AuditObjectPrep.bl_idname,
+        text="Scene",
+        icon='SCENE_DATA',
+    )
+    op.scope = 'ALL'
+
+    if scene.pm_vr_audit_results:
+        index = min(scene.pm_vr_audit_index, len(scene.pm_vr_audit_results) - 1)
+        item = scene.pm_vr_audit_results[index]
+        audit_results = box.box()
+        summary = audit_results.row(align=True)
+        summary.label(
+            text=(
+                f"{len(scene.pm_vr_audit_results)} problem object(s)  ·  "
+                f"{scene.pm_vr_audit_issue_count} issue(s)"
+            ),
+            icon='ERROR',
+        )
+        summary.operator(PM_OT_VR_AuditClear.bl_idname, text="", icon='X')
+
+        nav = audit_results.row(align=True)
+        op = nav.operator(PM_OT_VR_AuditNavigate.bl_idname, text="", icon='TRIA_LEFT')
+        op.direction = 'PREVIOUS'
+        object_name = item.object.name if item.object else "Missing object"
+        nav.label(text=f"{index + 1} / {len(scene.pm_vr_audit_results)}   {object_name}")
+        op = nav.operator(PM_OT_VR_AuditNavigate.bl_idname, text="", icon='TRIA_RIGHT')
+        op.direction = 'NEXT'
+
+        if item.object:
+            for detail in audit_issue_details(item.object, item.issue_flags):
+                audit_results.label(text=detail, icon='DOT')
+        else:
+            audit_results.label(text="Object was removed from the file", icon='ERROR')
+
+        actions = audit_results.row(align=True)
+        actions.operator(PM_OT_VR_AuditSelectActive.bl_idname, text="Select Object", icon='RESTRICT_SELECT_OFF')
+        actions.operator(PM_OT_VR_AuditRecheckActive.bl_idname, icon='FILE_REFRESH')
+        footer = audit_results.row(align=True)
+        footer.operator(PM_OT_VR_AuditSelectAll.bl_idname, icon='GROUP')
+        footer.label(text="Snapshot · recheck after edits", icon='INFO')
 
     box.separator()
 
     name_col = box.column(align=True)
-    name_col.label(text="Copy Object Names:")
-    op = name_col.operator(PM_OT_VR_SyncNamesFromObjects.bl_idname, text="Sync Selected", icon='OUTLINER_OB_MESH')
+    op = name_col.operator(PM_OT_VR_SyncNamesFromObjects.bl_idname, text="Sync Names", icon='OUTLINER_OB_MESH')
     op.scope = 'SELECTED'
 
     box.separator()
 
     uv_col = box.column(align=True)
     uv_col.label(text="UV Channels:")
-    op = uv_col.operator(PM_OT_VR_CheckUVChannels.bl_idname, text="Check UV Selected", icon='GROUP_UVS')
+    row = uv_col.row(align=True)
+    op = row.operator(PM_OT_VR_CheckUVChannels.bl_idname, text="Check UV Channels", icon='VIEWZOOM')
+    op.scope = 'SELECTED'
+    op = row.operator(PM_OT_VR_FixUVChannels.bl_idname, text="Fix UV Channels", icon='TOOL_SETTINGS')
     op.scope = 'SELECTED'
     row = uv_col.row(align=True)
     row.operator(PM_OT_VR_ActivateUVMap.bl_idname, text="Activate UVMap", icon='GROUP_UVS')
@@ -1177,9 +1624,17 @@ def draw_ui(layout, context):
 
 
 classes = (
+    PMVR_AuditResultItem,
     PM_OT_VR_AuditObjectPrep,
+    PM_OT_VR_AuditNavigate,
+    PM_OT_VR_AuditSelectActive,
+    PM_OT_VR_AuditSelectAll,
+    PM_OT_VR_AuditRecheckActive,
+    PM_OT_VR_AuditClear,
     PM_OT_VR_SyncNamesFromObjects,
     PM_OT_VR_CheckUVChannels,
+    PM_OT_VR_FixUVChannels,
+    PM_OT_VR_EnsureUVChannelsCompatibility,
     PM_OT_VR_RelinkSelectedTexturesFromFolder,
     PM_OT_VR_ExternalizeSelectedTextures,
     PM_OT_VR_AddTextureSuffix,
@@ -1207,9 +1662,41 @@ def register():
         description="Put 1K/2K/4K before the object name instead of after it",
         default=False,
     )
+    bpy.types.Scene.pm_vr_audit_results = bpy.props.CollectionProperty(
+        type=PMVR_AuditResultItem,
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_audit_index = bpy.props.IntProperty(
+        default=0,
+        min=0,
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_audit_checked_count = bpy.props.IntProperty(
+        default=0,
+        min=0,
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_audit_issue_count = bpy.props.IntProperty(
+        default=0,
+        min=0,
+        options={'SKIP_SAVE'},
+    )
+    bpy.types.Scene.pm_vr_audit_scope_label = bpy.props.StringProperty(
+        options={'SKIP_SAVE'},
+    )
 
 
 def unregister():
+    viewport_notice.shutdown()
+    for property_name in (
+        "pm_vr_audit_scope_label",
+        "pm_vr_audit_issue_count",
+        "pm_vr_audit_checked_count",
+        "pm_vr_audit_index",
+        "pm_vr_audit_results",
+    ):
+        if hasattr(bpy.types.Scene, property_name):
+            delattr(bpy.types.Scene, property_name)
     if hasattr(bpy.types.Scene, "pm_vr_use_texture_prefix"):
         del bpy.types.Scene.pm_vr_use_texture_prefix
     if hasattr(bpy.types.Scene, "pm_vr_target_td"):
