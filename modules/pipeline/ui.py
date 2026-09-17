@@ -4,6 +4,7 @@ import bpy
 
 from .identity import find_layer, find_unit, layer_members, unit_members
 from .setup_ops import active_layer, active_unit
+from . import viewport_overlay
 
 
 def draw_state_switch(layout, project):
@@ -22,6 +23,7 @@ def draw_state_switch(layout, project):
 class PMVR_UL_RenderLayers(bpy.types.UIList):
     def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
         row = layout.row(align=True)
+        row.prop(item, "viewport_color", text="")
         row.prop(item, "enabled", text="")
         row.prop(item, "display_name", text="", emboss=False, icon='RENDERLAYERS')
         row.label(text=item.bl_rna.properties["processing_profile"].enum_items[item.processing_profile].name)
@@ -62,6 +64,7 @@ def draw_setup(layout, context):
         return
 
     draw_state_switch(layout, project)
+    viewport_overlay.draw_controls(layout, project)
 
     layers = layout.box()
     layers.label(text="Render Layers", icon='RENDERLAYERS')
@@ -134,6 +137,7 @@ def draw_bake(layout, context):
     states.prop(project, "bake_day", text="Day", icon='LIGHT_SUN', toggle=True)
     states.prop(project, "bake_evening", text="Evening", icon='LIGHT', toggle=True)
     layout.prop(project, "bake_mode", expand=True)
+    viewport_overlay.draw_controls(layout, project)
     queue = layout.box()
     mode_label = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
     queue.label(text=f"{mode_label} Unit Queue", icon='SEQ_STRIP_DUPLICATE')

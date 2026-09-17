@@ -5,7 +5,7 @@ import math
 import bpy
 
 from ..vr_project_tools import get_mesh_areas, get_target_td
-from .constants import GENERATED_COLLECTION, RESOLUTION_ITEMS, ROLE_ITEMS, SCHEMA_VERSION, TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID
+from .constants import GENERATED_COLLECTION, LAYER_COLOR_PALETTE, RESOLUTION_ITEMS, ROLE_ITEMS, SCHEMA_VERSION, TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID
 from .identity import (
     ensure_project_id,
     ensure_source_id,
@@ -81,6 +81,10 @@ def add_layer(project, name="Render Layer", profile='BEAUTY_SCENE'):
     layer.display_name = name
     layer.output_base_name = safe_stem(name)
     layer.processing_profile = profile
+    layer.viewport_color = LAYER_COLOR_PALETTE[
+        (len(project.render_layers) - 1) % len(LAYER_COLOR_PALETTE)
+    ]
+    layer.viewport_color_initialized = True
     project.active_render_layer_index = len(project.render_layers) - 1
     return layer
 

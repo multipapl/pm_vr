@@ -16,3 +16,10 @@
 - Global Checker applies it to all mesh objects in the scene. Selected Checker persists only on selected objects, and Clear All restores every checker-managed object in the scene.
 - Overrides are temporary object-level material-slot assignments, so source material node trees and mesh material assignments remain untouched. The add-on does not change viewport shading mode.
 - Standard renders, PM VR bakes, and PM VR exports temporarily suspend every checker override and restore it afterward. Nested render/bake callbacks are handled without re-enabling the checker early.
+
+## Viewport pipeline overlay
+
+- The Setup and Bake stages offer non-destructive GPU diagnostics without changing materials, object colors, or viewport shading. Surface mode uses cached bulk mesh buffers and a sub-pixel fragment-depth offset for transparent exact-surface fills; it does not scale or displace geometry. Corners remains the lightweight fallback.
+- Bake Status colors source meshes as Missing, Existing, baked This Session, No Bake, or Unassigned for the active Day/Evening and Beauty/Lightmap combination.
+- Render Layers uses persistent user-editable colors stored per semantic layer. Existing layers receive distinct palette colors when the add-on loads. Unassigned meshes are hidden by default and can be revealed as restrained amber warnings.
+- Session bake state is held only in memory, marked after a successful commit, and cleared when another blend file is loaded.

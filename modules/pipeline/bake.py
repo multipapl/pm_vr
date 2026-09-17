@@ -32,7 +32,7 @@ from .constants import (
     WORK_COLLECTION,
 )
 from .identity import find_layer, find_unit, safe_stem, unit_members
-from . import log
+from . import log, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
 
@@ -1083,6 +1083,12 @@ class BeautyBakeRuntime:
             self.image,
             "SUCCESS",
         )
+        viewport_overlay.mark_baked(
+            self.project,
+            self.unit,
+            self.state,
+            'BEAUTY',
+        )
         self.finished = True
         log.info(
             "Beauty",
@@ -1256,6 +1262,7 @@ def bake_lightmap_unit(context, unit, operator=None):
             if old_image and old_image.users == 0:
                 bpy.data.images.remove(old_image)
         _record(project, unit, state, signature, raw, "SUCCESS", mode='LIGHTMAP')
+        viewport_overlay.mark_baked(project, unit, state, 'LIGHTMAP')
         return "SUCCESS", "Lightmap ready"
     except Exception as exc:
         _record(

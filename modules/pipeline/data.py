@@ -8,6 +8,12 @@ from .constants import MODE_ITEMS, PROFILE_ITEMS, RESOLUTION_ITEMS, ROLE_ITEMS, 
 _RESOLUTION_UPDATE_RUNNING = False
 
 
+def _overlay_updated(_owner, _context):
+    from . import viewport_overlay
+
+    viewport_overlay.tag_redraw()
+
+
 def _active_layer_changed(project, _context):
     if not project.render_layers or not project.bake_units:
         project.active_bake_unit_index = 0
@@ -57,6 +63,17 @@ class PMVR_RenderLayer(bpy.types.PropertyGroup):
     # export name.
     output_base_name: bpy.props.StringProperty(name="Legacy Output Name", default="")
     enabled: bpy.props.BoolProperty(name="Enabled", default=True)
+    viewport_color: bpy.props.FloatVectorProperty(
+        name="Viewport Color",
+        description="Color used by the Render Layers viewport overlay",
+        subtype='COLOR',
+        size=3,
+        min=0.0,
+        max=1.0,
+        default=(0.74, 0.08, 0.92),
+        update=_overlay_updated,
+    )
+    viewport_color_initialized: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
     processing_profile: bpy.props.EnumProperty(name="Profile", items=PROFILE_ITEMS, default='BEAUTY_SCENE')
     export_usdz: bpy.props.BoolProperty(name="USDZ", default=True)
     export_glb: bpy.props.BoolProperty(name="GLB", default=False)
@@ -121,10 +138,56 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     day_world: bpy.props.PointerProperty(name="Day World", type=bpy.types.World)
     evening_lighting_collection: bpy.props.PointerProperty(name="Evening Lighting", type=bpy.types.Collection)
     evening_world: bpy.props.PointerProperty(name="Evening World", type=bpy.types.World)
-    active_lighting_state: bpy.props.EnumProperty(name="Lighting State", items=STATE_ITEMS, default='DAY')
+    active_lighting_state: bpy.props.EnumProperty(
+        name="Lighting State",
+        items=STATE_ITEMS,
+        default='DAY',
+        update=_overlay_updated,
+    )
     bake_day: bpy.props.BoolProperty(name="Day", default=True)
     bake_evening: bpy.props.BoolProperty(name="Evening", default=False)
-    bake_mode: bpy.props.EnumProperty(name="Bake Mode", items=MODE_ITEMS, default='BEAUTY')
+    bake_mode: bpy.props.EnumProperty(
+        name="Bake Mode",
+        items=MODE_ITEMS,
+        default='BEAUTY',
+        update=_overlay_updated,
+    )
+    overlay_mode: bpy.props.EnumProperty(
+        name="Viewport Overlay",
+        description="Color source objects by bake status or semantic render layer",
+        items=(
+            ('OFF', "Off", "Disable the PM VR viewport overlay"),
+            ('BAKE_STATUS', "Bake Status", "Show missing, existing, and session bake results"),
+            ('RENDER_LAYERS', "Render Layers", "Color objects by semantic render layer"),
+        ),
+        default='OFF',
+        update=_overlay_updated,
+    )
+    overlay_opacity: bpy.props.FloatProperty(
+        name="Intensity",
+        description="Visibility of the PM VR diagnostic overlay",
+        default=0.65,
+        min=0.05,
+        max=1.0,
+        subtype='FACTOR',
+        update=_overlay_updated,
+    )
+    overlay_style: bpy.props.EnumProperty(
+        name="Display",
+        description="Use exact transparent surfaces or lightweight corner markers",
+        items=(
+            ('SURFACE', "Surface", "Transparent exact-surface diagnostic fill"),
+            ('CORNERS', "Corners", "Lightweight bounding-box corner markers"),
+        ),
+        default='SURFACE',
+        update=_overlay_updated,
+    )
+    overlay_show_unassigned: bpy.props.BoolProperty(
+        name="Show Unassigned",
+        description="Show amber diagnostics for source meshes without a valid render layer assignment",
+        default=False,
+        update=_overlay_updated,
+    )
 
     margin: bpy.props.IntProperty(name="Margin", default=16, min=0, soft_max=128)
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)

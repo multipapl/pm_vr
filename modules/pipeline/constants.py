@@ -34,6 +34,17 @@ MODE_ITEMS = (
     ('LIGHTMAP', "Lightmap", "Classic Blender-side diffuse lightmap"),
 )
 
+LAYER_COLOR_PALETTE = (
+    (0.74, 0.08, 0.92),
+    (0.04, 0.86, 0.24),
+    (0.12, 0.22, 0.95),
+    (0.95, 0.08, 0.05),
+    (0.98, 0.55, 0.05),
+    (0.02, 0.72, 0.82),
+    (0.96, 0.20, 0.55),
+    (0.48, 0.76, 0.08),
+)
+
 TAG_GENERATED = "pmvr_generated"
 TAG_SOURCE_ID = "pmvr_source_id"
 TAG_UNIT_ID = "pmvr_unit_id"
