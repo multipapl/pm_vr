@@ -159,8 +159,12 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
             ('OFF', "Off", "Disable the PM VR viewport overlay"),
             ('BAKE_STATUS', "Bake Status", "Show missing, existing, and session bake results"),
             ('RENDER_LAYERS', "Render Layers", "Color objects by semantic render layer"),
+            ('UV_HEALTH', "UV Health", "Show invalid and missing pipeline UV channels"),
+            ('TEXEL_DENSITY', "Texel Density", "Show SimpleBake texel density against the project target"),
+            ('UV_CHECKER', "Checker", "Preview the PM VR checker through a selected UV channel"),
         ),
         default='OFF',
+        options={'SKIP_SAVE'},
         update=_overlay_updated,
     )
     overlay_opacity: bpy.props.FloatProperty(
@@ -172,14 +176,14 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         subtype='FACTOR',
         update=_overlay_updated,
     )
-    overlay_style: bpy.props.EnumProperty(
-        name="Display",
-        description="Use exact transparent surfaces or lightweight corner markers",
+    debug_checker_uv: bpy.props.EnumProperty(
+        name="Checker UV",
+        description="UV channel used by the GPU checker diagnostic",
         items=(
-            ('SURFACE', "Surface", "Transparent exact-surface diagnostic fill"),
-            ('CORNERS', "Corners", "Lightweight bounding-box corner markers"),
+            ('PRIMARY', "UVMap", "Preview the first UV channel"),
+            ('BAKE', "SimpleBake", "Preview the second UV channel"),
         ),
-        default='SURFACE',
+        default='BAKE',
         update=_overlay_updated,
     )
     overlay_show_unassigned: bpy.props.BoolProperty(

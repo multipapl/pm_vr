@@ -9,7 +9,6 @@ import uuid
 
 import bpy
 
-from .. import checker_preview
 from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image
 from ..lightmap_baker.images import create_float_image, remove_image, save_linear_exr
 from ..lightmap_baker.material import add_lightmap_nodes
@@ -1312,9 +1311,6 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         if not states:
             self.report({'ERROR'}, "Choose Day, Evening, or both")
             return {'CANCELLED'}
-        self._checker_preview_token = checker_preview.suspend_scene(
-            context.scene
-        )
         self._viewport_shading = _switch_viewports_to_wireframe(context)
         log.info(
             "Bake",
@@ -1510,10 +1506,6 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 f"{self._original_state}: {exc}"
             )
         _restore_viewport_shading(self._viewport_shading)
-        checker_preview.restore_suspended(
-            self._checker_preview_token
-        )
-        self._checker_preview_token = None
         state_label = " + ".join(state.title() for state in self._states)
         summary = (
             f"Beauty ({state_label}): {self._succeeded} ready, "
@@ -1586,10 +1578,6 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             context.window_manager.progress_end()
             project.operation_running = False
             _restore_viewport_shading(self._viewport_shading)
-            checker_preview.restore_suspended(
-                self._checker_preview_token
-            )
-            self._checker_preview_token = None
             try:
                 activate_state(context, original_state)
             except Exception as exc:

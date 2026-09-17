@@ -4,9 +4,10 @@ import re
 import shutil
 
 import bpy
+from bpy.app.handlers import persistent
 
 from ..selection_targets import get_selected_target_objects
-from . import checker_preview, viewport_notice
+from . import viewport_notice
 
 UI_CATEGORY = "OPTIMIZATION"
 
@@ -1267,7 +1268,8 @@ class PM_OT_VR_ExternalizeSelectedTextures(bpy.types.Operator):
         return {'FINISHED'}
 
 
-TARGET_TD_PX_PER_CM = 10.0
+TARGET_TD_PX_PER_CM = 5.0
+_TD_DEFAULT_VERSION_KEY = "pm_vr_target_td_default_version"
 TEXTURE_OPTIONS = {
     "1K": 1024,
     "2K": 2048,
@@ -1373,6 +1375,21 @@ def get_mesh_areas(obj):
 # for old files, scripts, and emergency manual use. See docs/LEGACY.md.
 def get_target_td(context):
     return getattr(context.scene, "pm_vr_target_td", TARGET_TD_PX_PER_CM)
+
+
+def _migrate_target_td_defaults():
+    scenes = getattr(bpy.data, "scenes", ())
+    for scene in scenes:
+        if scene.get(_TD_DEFAULT_VERSION_KEY, 0) >= 1:
+            continue
+        if abs(float(scene.pm_vr_target_td) - 10.0) < 1.0e-6:
+            scene.pm_vr_target_td = TARGET_TD_PX_PER_CM
+        scene[_TD_DEFAULT_VERSION_KEY] = 1
+
+
+@persistent
+def _migrate_target_td_load_post(_filepath):
+    _migrate_target_td_defaults()
 
 
 def get_use_texture_prefix(context):
@@ -1561,17 +1578,13 @@ class PM_OT_VR_SelectDisplacementObjects(bpy.types.Operator):
         return context.mode == 'OBJECT'
 
     def execute(self, context):
-        checker_token = checker_preview.suspend_scene(context.scene)
-        try:
-            matches = [
-                obj for obj in context.scene.objects
-                if any(
-                    material_uses_displacement(material)
-                    for material in iter_object_materials(obj)
-                )
-            ]
-        finally:
-            checker_preview.restore_suspended(checker_token)
+        matches = [
+            obj for obj in context.scene.objects
+            if any(
+                material_uses_displacement(material)
+                for material in iter_object_materials(obj)
+            )
+        ]
 
         selectable = {
             obj.as_pointer(): obj for obj in context.view_layer.objects
@@ -1671,10 +1684,6 @@ def draw_ui(layout, context):
     row.operator(PM_OT_VR_ActivateUVMap.bl_idname, text="Activate UVMap", icon='GROUP_UVS')
     row.operator(PM_OT_VR_ActivateSimpleBake.bl_idname, text="Activate SimpleBake", icon='GROUP_UVS')
 
-    box.separator()
-
-    checker_preview.draw_ui(box, context)
-
     selection_col = box.column(align=True)
     selection_col.label(text="Scene Selection:")
     selection_col.operator(
@@ -1728,7 +1737,7 @@ def register():
     # their controls are no longer drawn in the Optimize panel.
     bpy.types.Scene.pm_vr_target_td = bpy.props.FloatProperty(
         name="Target Texel Density",
-        description="Texel density target in pixels per centimeter for _1K/_2K/_4K suffix selection",
+        description="Pipeline texel density target in pixels per centimeter",
         default=TARGET_TD_PX_PER_CM,
         min=0.1,
         soft_min=1.0,
@@ -1763,9 +1772,14 @@ def register():
     bpy.types.Scene.pm_vr_audit_scope_label = bpy.props.StringProperty(
         options={'SKIP_SAVE'},
     )
+    if _migrate_target_td_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_migrate_target_td_load_post)
+    _migrate_target_td_defaults()
 
 
 def unregister():
+    if _migrate_target_td_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_migrate_target_td_load_post)
     viewport_notice.shutdown()
     for property_name in (
         "pm_vr_audit_scope_label",

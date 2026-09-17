@@ -2,7 +2,16 @@
 
 import bpy
 
-from . import bake, data, export, selection_sync, setup_ops, ui, viewport_overlay
+from . import (
+    bake,
+    data,
+    export,
+    scene_debug,
+    selection_sync,
+    setup_ops,
+    ui,
+    viewport_overlay,
+)
 
 
 def register():
@@ -11,9 +20,11 @@ def register():
     data.register_properties()
     selection_sync.register()
     viewport_overlay.register()
+    scene_debug.register()
 
 
 def unregister():
+    scene_debug.unregister()
     viewport_overlay.unregister()
     selection_sync.unregister()
     data.unregister_properties()

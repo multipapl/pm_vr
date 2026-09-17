@@ -10,16 +10,19 @@
 
 - The synchronized Base Color/Roughness/Alpha texture preview was removed. Updating every material in a real scene made the interaction too slow to be useful.
 
-## Optimize checker preview
+## Retired material checker
 
-- Checker Preview uses the supplied A1-H8 image at 1024 x 1024 px with adjustable UV tiling.
-- Global Checker applies it to all mesh objects in the scene. Selected Checker persists only on selected objects, and Clear All restores every checker-managed object in the scene.
-- Overrides are temporary object-level material-slot assignments, so source material node trees and mesh material assignments remain untouched. The add-on does not change viewport shading mode.
-- Standard renders, PM VR bakes, and PM VR exports temporarily suspend every checker override and restore it afterward. Nested render/bake callbacks are handled without re-enabling the checker early.
+- The former Optimize Global/Selected Checker and all bake/export suspension hooks were removed after the GPU Checker replaced them.
+- On load, legacy slot-state data is used once to restore original materials and remove unused PMVR_CheckerPreview materials. Only the shared A1-H8 image and tiling property remain for GPU diagnostics.
 
 ## Viewport pipeline overlay
 
-- The Setup and Bake stages offer non-destructive GPU diagnostics without changing materials, object colors, or viewport shading. Surface mode uses cached bulk mesh buffers and a sub-pixel fragment-depth offset for transparent exact-surface fills; it does not scale or displace geometry. Corners remains the lightweight fallback.
+- The Setup and Bake stages offer non-destructive GPU diagnostics without changing materials, object colors, or viewport shading. The renderer uses cached bulk mesh buffers and a sub-pixel fragment-depth offset for transparent exact-surface fills; it does not scale or displace geometry.
 - Bake Status colors source meshes as Missing, Existing, baked This Session, No Bake, or Unassigned for the active Day/Evening and Beauty/Lightmap combination.
 - Render Layers uses persistent user-editable colors stored per semantic layer. Existing layers receive distinct palette colors when the add-on loads. Unassigned meshes are hidden by default and can be revealed as restrained amber warnings.
 - Session bake state is held only in memory, marked after a successful commit, and cleared when another blend file is loaded.
+- Scene Debug starts with Ctrl+Shift+D or by clicking any Bake/Layers/UV/TD/Checker channel button. While active, 1 shows Bake Status, 2 shows Render Layers, 3 shows UV Health, 4 shows Texel Density, 5 shows Checker, bracket keys cycle modes, and Esc exits. All unrelated events pass through to Blender. The lower-left HUD includes the controls.
+- UV Health validates the reserved first two UV channels (UVMap, SimpleBake). Invalid bake-capable meshes are red, valid meshes green, and explicit Export Original meshes muted.
+- Texel Density evaluates only the second UV channel, which must be named SimpleBake, against the project px/cm target. Objects in a valid bake unit use that unit's resolution; objects not yet added to the pipeline use Default Unit Resolution. The color varies continuously from blue (below target), through green (near target), to red (above target); invalid UV or geometry data is magenta.
+- Checker is a GPU-only Scene Debug channel on key 5. It uses the shared A1-H8 asset without changing materials, defaults to the second SimpleBake UV channel, can switch to the first UVMap channel, and reuses the existing checker tiling setting. Missing selected UV channels are magenta.
+- Scene Debug mode is session-only and is forced Off whenever a blend file loads, so a saved active overlay cannot leave an orphaned HUD without its modal controller.

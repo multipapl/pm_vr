@@ -14,10 +14,13 @@ Retained operators:
 - `pm_vr.add_texture_suffix`
 - `pm_vr.remove_texture_suffix`
 
-Retained Scene properties:
+Retained legacy-only Scene property:
 
-- `pm_vr_target_td`
 - `pm_vr_use_texture_prefix`
+
+`pm_vr_target_td` is no longer legacy-only: bake-unit setup and the Texel
+Density viewport diagnostic both use it as the project target. Its default is
+5 px/cm.
 
 Retained behavior includes SimpleBake UV-area measurement, texel-density
 resolution selection, and prefix/suffix cleanup. These APIs may be removed only
