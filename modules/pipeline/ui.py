@@ -39,14 +39,7 @@ class PMVR_UL_BakeUnits(bpy.types.UIList):
 
     def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index):
         row = layout.row(align=True)
-        op = row.operator(
-            "pmvr.select_bake_unit_row",
-            text="",
-            icon='CHECKBOX_HLT' if item.batch_selected else 'CHECKBOX_DEHLT',
-            emboss=False,
-        )
-        op.unit_id = item.unit_id
-        row.prop(item, "enabled", text="")
+        row.prop(item, "batch_selected", text="")
         row.prop(item, "display_name", text="", emboss=False, icon='UV')
         row.prop(item, "resolution", text="")
 
@@ -100,7 +93,9 @@ def draw_setup(layout, context):
     controls = row.column(align=True)
     controls.operator("pmvr.add_bake_unit", text="", icon='ADD')
     controls.operator("pmvr.remove_bake_unit", text="", icon='REMOVE')
-    units.label(text="Click the checkbox to select; Shift-click adds to the resolution batch.", icon='INFO')
+    controls.separator()
+    controls.operator("pmvr.select_all_units_for_resolution", text="", icon='CHECKBOX_HLT')
+    units.label(text="Drag over checkboxes to build a resolution batch.", icon='INFO')
     units.label(text="+ creates separate units; Shift-click + creates one shared unit.")
     unit = active_unit(project)
     if unit:

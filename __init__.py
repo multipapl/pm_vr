@@ -2,6 +2,7 @@ import bpy
 import importlib
 
 from .modules import lightmap_baker
+from .modules import checker_preview
 from .modules import collection_export
 from .modules import material_rebuild
 from .modules import pipeline
@@ -19,7 +20,12 @@ bl_info = {
 }
 
 
-MODULES = (lightmap_baker, vr_project_tools, material_rebuild, collection_export, pipeline)
+MODULES = (lightmap_baker, checker_preview, vr_project_tools, material_rebuild, collection_export, pipeline)
+
+
+def _ui_stage_changed(ui_state, _context):
+    if ui_state.stage == 'SETUP':
+        pipeline.request_selection_sync()
 
 
 class PMVR_UI_State(bpy.types.PropertyGroup):
@@ -34,6 +40,7 @@ class PMVR_UI_State(bpy.types.PropertyGroup):
             ('EXPORT', "Export", "Semantic layer export", 'EXPORT', 3),
         ),
         default='OPTIMIZATION',
+        update=_ui_stage_changed,
     )
 
 

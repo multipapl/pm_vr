@@ -6,7 +6,7 @@ import shutil
 import bpy
 
 from ..selection_targets import get_selected_target_objects
-from . import viewport_notice
+from . import checker_preview, viewport_notice
 
 UI_CATEGORY = "OPTIMIZATION"
 
@@ -113,6 +113,24 @@ def iter_object_materials(obj):
             continue
         seen.add(key)
         yield material
+
+
+def material_uses_displacement(material):
+    if not material or not material.use_nodes or not material.node_tree:
+        return False
+    outputs = [
+        node for node in material.node_tree.nodes
+        if node.type == 'OUTPUT_MATERIAL'
+    ]
+    active_outputs = [
+        node for node in outputs
+        if getattr(node, "is_active_output", False)
+    ]
+    for output in active_outputs or outputs:
+        displacement = output.inputs.get("Displacement")
+        if displacement and displacement.is_linked:
+            return True
+    return False
 
 
 def iter_material_image_nodes(material):
@@ -1349,6 +1367,10 @@ def get_mesh_areas(obj):
         obj_eval.to_mesh_clear()
 
 
+# LEGACY TEXEL-LABEL WORKFLOW
+# Hidden from the Optimize UI since bake-unit resolution superseded object-name
+# 1K/2K/4K labels. Keep the helpers, operators, and Scene properties registered
+# for old files, scripts, and emergency manual use. See docs/LEGACY.md.
 def get_target_td(context):
     return getattr(context.scene, "pm_vr_target_td", TARGET_TD_PX_PER_CM)
 
@@ -1525,6 +1547,58 @@ class PM_OT_VR_ActivateSimpleBake(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class PM_OT_VR_SelectDisplacementObjects(bpy.types.Operator):
+    bl_idname = "pm_vr.select_displacement_objects"
+    bl_label = "Select Displacement Objects"
+    bl_description = (
+        "Select scene objects whose active Material Output has a linked "
+        "Displacement input"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT'
+
+    def execute(self, context):
+        checker_token = checker_preview.suspend_scene(context.scene)
+        try:
+            matches = [
+                obj for obj in context.scene.objects
+                if any(
+                    material_uses_displacement(material)
+                    for material in iter_object_materials(obj)
+                )
+            ]
+        finally:
+            checker_preview.restore_suspended(checker_token)
+
+        selectable = {
+            obj.as_pointer(): obj for obj in context.view_layer.objects
+        }
+        bpy.ops.object.select_all(action='DESELECT')
+        selected = []
+        unavailable = 0
+        for obj in matches:
+            view_object = selectable.get(obj.as_pointer())
+            if not view_object or view_object.hide_select:
+                unavailable += 1
+                continue
+            try:
+                view_object.select_set(True)
+                selected.append(view_object)
+            except (ReferenceError, RuntimeError):
+                unavailable += 1
+
+        if selected:
+            context.view_layer.objects.active = selected[0]
+        message = f"Selected {len(selected)} displacement object(s)"
+        if unavailable:
+            message += f", {unavailable} unavailable in this View Layer"
+        self.report({'INFO'} if selected else {'WARNING'}, message)
+        return {'FINISHED'}
+
+
 def draw_ui(layout, context):
     box = layout.box()
     scene = context.scene
@@ -1599,13 +1673,15 @@ def draw_ui(layout, context):
 
     box.separator()
 
-    texture_col = box.column(align=True)
-    texture_col.label(text="Textures:")
-    texture_col.prop(context.scene, "pm_vr_target_td", text="Target TD px/cm")
-    texture_col.prop(context.scene, "pm_vr_use_texture_prefix", text="Use Prefix")
-    row = texture_col.row(align=True)
-    row.operator(PM_OT_VR_AddTextureSuffix.bl_idname, text="Add Texel Label", icon='TEXTURE')
-    row.operator(PM_OT_VR_RemoveTextureSuffix.bl_idname, text="Remove", icon='X')
+    checker_preview.draw_ui(box, context)
+
+    selection_col = box.column(align=True)
+    selection_col.label(text="Scene Selection:")
+    selection_col.operator(
+        PM_OT_VR_SelectDisplacementObjects.bl_idname,
+        text="Select Displacement",
+        icon='MOD_DISPLACE',
+    )
 
     box.separator()
 
@@ -1641,12 +1717,15 @@ classes = (
     PM_OT_VR_RemoveTextureSuffix,
     PM_OT_VR_ActivateUVMap,
     PM_OT_VR_ActivateSimpleBake,
+    PM_OT_VR_SelectDisplacementObjects,
 )
 
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    # Legacy texel-label settings intentionally remain registered even though
+    # their controls are no longer drawn in the Optimize panel.
     bpy.types.Scene.pm_vr_target_td = bpy.props.FloatProperty(
         name="Target Texel Density",
         description="Texel density target in pixels per centimeter for _1K/_2K/_4K suffix selection",

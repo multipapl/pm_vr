@@ -5,7 +5,7 @@ import uuid
 
 import bpy
 
-from .. import collection_export
+from .. import checker_preview, collection_export
 from .bake import bind_generated_state
 from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .identity import find_unit, layer_members, safe_stem
@@ -170,6 +170,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             return {'CANCELLED'}
         succeeded = skipped = failed = 0
         cancelled = False
+        checker_token = checker_preview.suspend_scene(context.scene)
         project.operation_running = True
         try:
             context.window_manager.progress_begin(0, len(jobs))
@@ -194,6 +195,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         finally:
             context.window_manager.progress_end()
             project.operation_running = False
+            checker_preview.restore_suspended(checker_token)
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"

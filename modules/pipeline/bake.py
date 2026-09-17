@@ -9,6 +9,7 @@ import uuid
 
 import bpy
 
+from .. import checker_preview
 from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image
 from ..lightmap_baker.images import create_float_image, remove_image, save_linear_exr
 from ..lightmap_baker.material import add_lightmap_nodes
@@ -129,18 +130,40 @@ def _source_root_objects(project):
     return set(root.all_objects) if root else set()
 
 
+def _layer_collections_for(root, collection):
+    matches = []
+    if root.collection == collection:
+        matches.append(root)
+    for child in root.children:
+        matches.extend(_layer_collections_for(child, collection))
+    return matches
+
+
 class EvaluationSnapshot:
     """Restore render visibility, samples and generated visibility after a unit."""
 
     def __init__(self, context):
         self.scene = context.scene
-        self.hide_render = [(obj, obj.hide_render) for obj in bpy.data.objects]
+        self.hide_render = [(obj, obj.hide_render) for obj in context.scene.objects]
         self.samples = getattr(context.scene.cycles, "samples", None) if hasattr(context.scene, "cycles") else None
+        generated = bpy.data.collections.get(GENERATED_COLLECTION)
+        self.generated_layer_states = [
+            (layer_collection, layer_collection.exclude)
+            for layer_collection in (
+                _layer_collections_for(context.view_layer.layer_collection, generated)
+                if generated else []
+            )
+        ]
 
     def isolate_source_root(self, project):
+        # Exclusion removes generated results from View Layer evaluation as
+        # well as rendering. Object hide_render remains a defensive fallback
+        # for generated objects linked through another collection path.
+        for layer_collection, _exclude in self.generated_layer_states:
+            layer_collection.exclude = True
         allowed = _source_root_objects(project)
         for obj, _value in self.hide_render:
-            if obj not in allowed:
+            if obj.get(TAG_GENERATED) or obj not in allowed:
                 obj.hide_render = True
 
     def restore(self):
@@ -153,6 +176,11 @@ class EvaluationSnapshot:
             try:
                 self.scene.cycles.samples = self.samples
             except (AttributeError, TypeError):
+                pass
+        for layer_collection, exclude in self.generated_layer_states:
+            try:
+                layer_collection.exclude = exclude
+            except (AttributeError, ReferenceError):
                 pass
 
 
@@ -1277,6 +1305,9 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         if not states:
             self.report({'ERROR'}, "Choose Day, Evening, or both")
             return {'CANCELLED'}
+        self._checker_preview_token = checker_preview.suspend_scene(
+            context.scene
+        )
         self._viewport_shading = _switch_viewports_to_wireframe(context)
         log.info(
             "Bake",
@@ -1403,7 +1434,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 self._job_cursor,
                 len(self._jobs),
             )
-            if not unit or not unit.enabled:
+            if not unit:
                 self._skipped += 1
                 self._feedback.complete_object()
                 continue
@@ -1472,6 +1503,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 f"{self._original_state}: {exc}"
             )
         _restore_viewport_shading(self._viewport_shading)
+        checker_preview.restore_suspended(
+            self._checker_preview_token
+        )
+        self._checker_preview_token = None
         state_label = " + ".join(state.title() for state in self._states)
         summary = (
             f"Beauty ({state_label}): {self._succeeded} ready, "
@@ -1519,7 +1554,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                         job_index,
                         total_jobs,
                     )
-                    if not unit or not unit.enabled:
+                    if not unit:
                         skipped += 1
                         continue
                     try:
@@ -1544,6 +1579,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             context.window_manager.progress_end()
             project.operation_running = False
             _restore_viewport_shading(self._viewport_shading)
+            checker_preview.restore_suspended(
+                self._checker_preview_token
+            )
+            self._checker_preview_token = None
             try:
                 activate_state(context, original_state)
             except Exception as exc:

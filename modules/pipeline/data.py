@@ -79,7 +79,9 @@ class PMVR_BakeUnit(bpy.types.PropertyGroup):
         default=False,
         options={'SKIP_SAVE'},
     )
-    enabled: bpy.props.BoolProperty(name="Enabled", default=True)
+    # Compatibility-only field for older .blend files. Bake execution is
+    # controlled exclusively by the explicit queue.
+    enabled: bpy.props.BoolProperty(name="Legacy Enabled", default=True, options={'HIDDEN'})
     day_signature: bpy.props.StringProperty(name="Day Signature", options={'HIDDEN'})
     evening_signature: bpy.props.StringProperty(name="Evening Signature", options={'HIDDEN'})
     day_beauty_image: bpy.props.StringProperty(name="Day Beauty Image", options={'HIDDEN'})

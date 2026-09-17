@@ -298,31 +298,39 @@ class PMVR_OT_ScaleQueuedResolution(bpy.types.Operator):
         return {'FINISHED'} if unit_ids else {'CANCELLED'}
 
 
-class PMVR_OT_SelectBakeUnitRow(bpy.types.Operator):
-    bl_idname = "pmvr.select_bake_unit_row"
-    bl_label = "Select Bake Unit for Batch Resolution"
-    bl_description = "Select this unit; hold Shift to add or remove it from the resolution batch"
+class PMVR_OT_SelectAllUnitsForResolution(bpy.types.Operator):
+    bl_idname = "pmvr.select_all_units_for_resolution"
+    bl_label = "Select All for Resolution"
+    bl_description = (
+        "Select every bake unit in the active render layer for batch "
+        "resolution changes"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
 
-    unit_id: bpy.props.StringProperty(options={'HIDDEN'})
-
-    def invoke(self, context, event):
+    @classmethod
+    def poll(cls, context):
         project = context.scene.pm_vr_project
-        unit = find_unit(project, self.unit_id)
-        if not unit:
-            return {'CANCELLED'}
-        if not event.shift:
-            for candidate in project.bake_units:
-                candidate.batch_selected = False
-            unit.batch_selected = True
-        else:
-            unit.batch_selected = not unit.batch_selected
-        for index, candidate in enumerate(project.bake_units):
-            if candidate.unit_id == unit.unit_id:
-                project.active_bake_unit_index = index
-                break
-        return {'FINISHED'}
+        layer = active_layer(project)
+        return bool(
+            layer
+            and any(
+                unit.render_layer_id == layer.layer_id
+                for unit in project.bake_units
+            )
+        )
 
-    def execute(self, _context):
+    def execute(self, context):
+        project = context.scene.pm_vr_project
+        layer = active_layer(project)
+        selected = 0
+        for unit in project.bake_units:
+            if unit.render_layer_id == layer.layer_id:
+                unit.batch_selected = True
+                selected += 1
+        self.report(
+            {'INFO'},
+            f"Selected {selected} unit(s) for batch resolution",
+        )
         return {'FINISHED'}
 
 
@@ -677,8 +685,8 @@ CLASSES = (
     PMVR_OT_AssignSelectedToLayer,
     PMVR_OT_UnassignSelected,
     PMVR_OT_AddBakeUnit,
-    PMVR_OT_SelectBakeUnitRow,
     PMVR_OT_ScaleQueuedResolution,
+    PMVR_OT_SelectAllUnitsForResolution,
     PMVR_OT_AssignSelectedToUnit,
     PMVR_OT_RemoveBakeUnit,
     PMVR_OT_RemoveSelectedFromUnit,

@@ -2,16 +2,18 @@
 
 import bpy
 
-from . import bake, data, export, setup_ops, ui
+from . import bake, data, export, selection_sync, setup_ops, ui
 
 
 def register():
     for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *bake.CLASSES, *export.CLASSES):
         bpy.utils.register_class(cls)
     data.register_properties()
+    selection_sync.register()
 
 
 def unregister():
+    selection_sync.unregister()
     data.unregister_properties()
     for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *bake.CLASSES, *export.CLASSES)):
         bpy.utils.unregister_class(cls)
@@ -29,3 +31,7 @@ def draw_stage(layout, context, stage):
 def draw_ui(layout, context):
     """Compatibility entry point used by the add-on UI smoke harness."""
     ui.draw_setup(layout, context)
+
+
+def request_selection_sync():
+    selection_sync.request_sync()
