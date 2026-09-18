@@ -4,7 +4,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import viewport_overlay
-from .constants import DEBUG_MODE_ITEMS
+from .constants import DEBUG_MODE_ITEMS, GENERAL_DEBUG_MODES
 
 
 DEBUG_MODES = tuple(item[0] for item in DEBUG_MODE_ITEMS)
@@ -23,6 +23,18 @@ _session_generation = 0
 _addon_keymaps = []
 
 
+def _available_modes(project):
+    if project and project.initialized:
+        return DEBUG_MODES
+    return tuple(mode for mode in DEBUG_MODES if mode in GENERAL_DEBUG_MODES)
+
+
+def _available_mode_items(_operator, context):
+    project = getattr(getattr(context, "scene", None), "pm_vr_project", None)
+    available = set(_available_modes(project))
+    return tuple(item for item in DEBUG_MODE_ITEMS if item[0] in available)
+
+
 def draw_controls(layout, context, project):
     box = layout.box()
     header = box.row(align=True)
@@ -39,6 +51,8 @@ def draw_controls(layout, context, project):
         icon='DOWNARROW_HLT',
     )
     if project.overlay_mode == 'OFF':
+        if not project.initialized:
+            box.label(text="Pipeline modes 1–3 require Initialize", icon='INFO')
         return
 
     box.prop(project, "overlay_opacity", text="Intensity", slider=True)
@@ -53,7 +67,10 @@ def draw_controls(layout, context, project):
         mode = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
         box.label(text=f"Showing {state} · {mode}", icon='INFO')
     if _operator_running:
-        box.label(text="1–8 switch modes · [ ] cycle · Esc exit")
+        if project.initialized:
+            box.label(text="1–8 switch modes · [ ] cycle · Esc exit")
+        else:
+            box.label(text="4–8 switch modes · [ ] cycle · Esc exit")
 
 
 def _set_status_text(context, text=None):
@@ -72,7 +89,7 @@ def _clear_all_status_text():
 
 def _set_mode(context, mode):
     project = getattr(context.scene, "pm_vr_project", None)
-    if not project or not project.initialized:
+    if not project or mode not in _available_modes(project):
         return False
     if mode == 'UV_CHECKER':
         viewport_overlay.prepare_checker()
@@ -96,7 +113,6 @@ class PMVR_OT_SceneDebugToggle(bpy.types.Operator):
             context.area
             and context.area.type == 'VIEW_3D'
             and project
-            and project.initialized
         )
 
     def execute(self, context):
@@ -110,17 +126,25 @@ class PMVR_OT_SceneDebugToggle(bpy.types.Operator):
 
         project = context.scene.pm_vr_project
         if project.overlay_mode == 'OFF':
-            project.overlay_mode = 'BAKE_STATUS'
+            project.overlay_mode = (
+                'BAKE_STATUS' if project.initialized else 'UV_HEALTH'
+            )
+        elif project.overlay_mode not in _available_modes(project):
+            project.overlay_mode = 'UV_HEALTH'
         _operator_running = True
         _stop_requested = False
         _session_generation += 1
         self._session_generation = _session_generation
         context.window_manager.modal_handler_add(self)
+        controls = (
+            "1 Bake  2 Layers  3 Units  4 UV  5 TD  6 Checker  7 Scale  "
+            "8 Linked"
+            if project.initialized
+            else "4 UV  5 TD  6 Checker  7 Scale  8 Linked"
+        )
         _set_status_text(
             context,
-            "PM VR Scene Debug  |  1 Bake  2 Layers  3 Units  4 UV  "
-            "5 TD  6 Checker  7 Scale  8 Linked  "
-            "[ ] Cycle  Esc Exit",
+            f"PM VR Scene Debug  |  {controls}  [ ] Cycle  Esc Exit",
         )
         viewport_overlay.tag_redraw()
         return {'RUNNING_MODAL'}
@@ -142,8 +166,10 @@ class PMVR_OT_SceneDebugToggle(bpy.types.Operator):
         if _stop_requested:
             return self._finish(context)
         project = getattr(context.scene, "pm_vr_project", None)
-        if not project or not project.initialized or project.overlay_mode == 'OFF':
+        if not project or project.overlay_mode == 'OFF':
             return self._finish(context)
+        if project.overlay_mode not in _available_modes(project):
+            project.overlay_mode = 'UV_HEALTH'
 
         if event.value != 'PRESS':
             return {'PASS_THROUGH'}
@@ -154,18 +180,18 @@ class PMVR_OT_SceneDebugToggle(bpy.types.Operator):
 
         mode = DIRECT_MODE_KEYS.get(event.type)
         if mode and not (event.ctrl or event.shift or event.alt or event.oskey):
-            _set_mode(context, mode)
-            return {'RUNNING_MODAL'}
+            if _set_mode(context, mode):
+                return {'RUNNING_MODAL'}
+            return {'PASS_THROUGH'}
 
         if event.type in {'LEFT_BRACKET', 'RIGHT_BRACKET'}:
-            current = (
-                project.overlay_mode
-                if project.overlay_mode in DEBUG_MODES
-                else DEBUG_MODES[0]
-            )
+            available_modes = _available_modes(project)
+            current = project.overlay_mode
+            if current not in available_modes:
+                current = available_modes[0]
             offset = -1 if event.type == 'LEFT_BRACKET' else 1
-            index = (DEBUG_MODES.index(current) + offset) % len(DEBUG_MODES)
-            _set_mode(context, DEBUG_MODES[index])
+            index = (available_modes.index(current) + offset) % len(available_modes)
+            _set_mode(context, available_modes[index])
             return {'RUNNING_MODAL'}
         return {'PASS_THROUGH'}
 
@@ -177,7 +203,7 @@ class PMVR_OT_SceneDebugSetMode(bpy.types.Operator):
     bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(
-        items=DEBUG_MODE_ITEMS,
+        items=_available_mode_items,
     )
 
     @classmethod
@@ -185,7 +211,9 @@ class PMVR_OT_SceneDebugSetMode(bpy.types.Operator):
         return PMVR_OT_SceneDebugToggle.poll(context)
 
     def execute(self, context):
-        _set_mode(context, self.mode)
+        if not _set_mode(context, self.mode):
+            self.report({'WARNING'}, "Initialize the pipeline to use this debug mode")
+            return {'CANCELLED'}
         if not _operator_running:
             return bpy.ops.pmvr.scene_debug_toggle('INVOKE_DEFAULT')
         return {'FINISHED'}

@@ -41,6 +41,10 @@ def draw_stage(layout, context, stage):
         ui.draw_export(layout, context)
 
 
+def draw_scene_debug(layout, context):
+    scene_debug.draw_controls(layout, context, context.scene.pm_vr_project)
+
+
 def draw_ui(layout, context):
     """Compatibility entry point used by the add-on UI smoke harness."""
     ui.draw_setup(layout, context)

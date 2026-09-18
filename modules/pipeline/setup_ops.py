@@ -118,7 +118,6 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
                 ("Translucent", 'TRANSLUCENT'),
                 ("Glass", 'GLASS'),
                 ("Emissive", 'EMISSIVE'),
-                ("Video", 'VIDEO'),
                 ("Runtime", 'RUNTIME'),
             ):
                 add_layer(project, name, layer_type)

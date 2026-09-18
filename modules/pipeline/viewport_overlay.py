@@ -22,7 +22,9 @@ from ..scene_diagnostics import (
 from .constants import (
     BAKE_UV_NAME,
     BAKE_LAYER_TYPES,
+    GENERAL_DEBUG_MODES,
     LAYER_COLOR_PALETTE,
+    PIPELINE_DEBUG_MODES,
     PRIMARY_UV_NAME,
     TAG_GENERATED,
 )
@@ -172,6 +174,12 @@ def _has_result(unit, state, mode):
 
 
 def _source_objects(scene, project):
+    if project.overlay_mode in GENERAL_DEBUG_MODES:
+        return [
+            obj for obj in scene.objects
+            if obj.type == 'MESH' and obj.data and not obj.get(TAG_GENERATED)
+        ]
+
     objects = set()
     root = project.source_root_collection
     if root:
@@ -358,7 +366,9 @@ def _classify(context, project, obj, layers, units):
 def _collect_items(context):
     scene = context.scene
     project = getattr(scene, "pm_vr_project", None)
-    if not project or not project.initialized or project.overlay_mode == 'OFF':
+    if not project or project.overlay_mode == 'OFF':
+        return [], Counter()
+    if project.overlay_mode in PIPELINE_DEBUG_MODES and not project.initialized:
         return [], Counter()
     layers = {layer.layer_id: layer for layer in project.render_layers}
     units = {unit.unit_id: unit for unit in project.bake_units}
@@ -821,15 +831,24 @@ def _draw_pixel():
     if not context.area or context.area.type != 'VIEW_3D':
         return
     project = getattr(context.scene, "pm_vr_project", None)
-    if not project or not project.initialized or project.overlay_mode == 'OFF':
+    if not project or project.overlay_mode == 'OFF':
+        return
+    if project.overlay_mode in PIPELINE_DEBUG_MODES and not project.initialized:
         return
     try:
         gpu.state.blend_set('ALPHA')
         _items, counts = _collect_items(context)
         title, entries = _legend_lines(context, project, counts)
         controls_primary = (
-            "1 Bake   2 Layers   3 Units   4 UV",
-            "5 TD   6 Checker   7 Scale   8 Linked",
+            (
+                "1 Bake   2 Layers   3 Units   4 UV",
+                "5 TD   6 Checker   7 Scale   8 Linked",
+            )
+            if project.initialized
+            else (
+                "4 UV   5 TD   6 Checker   7 Scale   8 Linked",
+                "Initialize the pipeline to enable modes 1–3",
+            )
         )
         controls_secondary = "[ / ] Cycle   Esc Exit   Ctrl Shift D Toggle"
         x = 20

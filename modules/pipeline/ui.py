@@ -4,7 +4,6 @@ import bpy
 
 from .identity import find_layer, find_unit, layer_members, unit_members
 from .setup_ops import active_layer, active_unit
-from . import scene_debug
 
 
 def draw_state_switch(layout, project):
@@ -64,8 +63,6 @@ def draw_setup(layout, context):
         return
 
     draw_state_switch(layout, project)
-    scene_debug.draw_controls(layout, context, project)
-
     layers = layout.box()
     layers.label(text="Render Layers", icon='RENDERLAYERS')
     row = layers.row()
@@ -137,7 +134,6 @@ def draw_bake(layout, context):
     states.prop(project, "bake_day", text="Day", icon='LIGHT_SUN', toggle=True)
     states.prop(project, "bake_evening", text="Evening", icon='LIGHT', toggle=True)
     layout.prop(project, "bake_mode", expand=True)
-    scene_debug.draw_controls(layout, context, project)
     queue = layout.box()
     mode_label = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
     queue.label(text=f"{mode_label} Unit Queue", icon='SEQ_STRIP_DUPLICATE')

@@ -7,7 +7,7 @@
 
 > Current taxonomy amendment: one authoritative `layer_type` defines both
 > runtime meaning and Blender behavior. Its values are Unlit, PBR, Alpha,
-> Translucent, Glass, Emissive, Video, and Runtime. There is no parallel
+> Translucent, Glass, Emissive, and Runtime. There is no parallel
 > processing-profile entity. Later sections using the former
 > Scene/Reflect/Translusent/Curtains terminology are legacy examples.
 
@@ -372,7 +372,6 @@ ALPHA
 TRANSLUCENT
 GLASS
 EMISSIVE
-VIDEO
 RUNTIME
 ```
 
@@ -381,7 +380,8 @@ Behavior is derived directly from this single value:
 - Unlit and Translucent use the simple unlit Beauty processor.
 - PBR bakes Base Color and preserves PBR channels.
 - Alpha bakes Base Color and preserves Alpha.
-- Glass, Emissive, Video, and Runtime export original source data.
+- Glass, Emissive, and Runtime export original source data. Video and other
+  visual-FX surfaces use `Runtime/FX`; sound placement points use `Runtime/SFX`.
 
 Do not infer the type from the portion of the layer name after `_`. The saved enum is authoritative.
 

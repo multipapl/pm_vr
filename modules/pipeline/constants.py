@@ -13,8 +13,7 @@ LAYER_TYPE_ITEMS = (
     ('TRANSLUCENT', "Translucent", "Light-transmitting fabrics and curtains"),
     ('GLASS', "Glass", "Original transparent or refractive geometry"),
     ('EMISSIVE', "Emissive", "Original emissive renderable content"),
-    ('VIDEO', "Video", "Original geometry driven by video content"),
-    ('RUNTIME', "Runtime", "Non-rendered runtime data such as probes, anchors, navigation, and collisions"),
+    ('RUNTIME', "Runtime", "Runtime-driven FX, sound points, probes, UI, navigation, and collisions"),
 )
 
 UNLIT_LAYER_TYPES = frozenset({'UNLIT', 'TRANSLUCENT'})
@@ -50,6 +49,13 @@ DEBUG_MODE_ITEMS = (
     ('UV_CHECKER', "Checker", "Preview the PM VR checker through a selected UV channel"),
     ('SCALE_CHECK', "Scale Check", "Highlight objects with unapplied scale"),
     ('LINKED_MESHES', "Linked Meshes", "Highlight objects that share mesh data"),
+)
+
+PIPELINE_DEBUG_MODES = frozenset({'BAKE_STATUS', 'RENDER_LAYERS', 'BAKE_UNITS'})
+GENERAL_DEBUG_MODES = frozenset(
+    identifier
+    for identifier, _label, _description in DEBUG_MODE_ITEMS
+    if identifier not in PIPELINE_DEBUG_MODES
 )
 
 DEBUG_OVERLAY_ITEMS = (

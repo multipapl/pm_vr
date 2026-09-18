@@ -42,17 +42,23 @@ The first UV channel is activated for baking as a safety measure; authored UV da
 Generated objects remain separate and are owned through stable IDs rather than names.
 
 Every semantic layer has one authoritative type: `Unlit`, `PBR`, `Alpha`,
-`Translucent`, `Glass`, `Emissive`, `Video`, or `Runtime`. The type directly
+`Translucent`, `Glass`, `Emissive`, or `Runtime`. The type directly
 defines both its runtime meaning and Blender behavior:
 
 - `Unlit` and `Translucent`: baked Base Color on `SimpleBake` in a simple Principled material;
 - `PBR`: baked Base Color plus original Metallic/Roughness/Normal on `UVMap`;
 - `Alpha`: baked Base Color plus original Alpha on `UVMap`;
-- `Glass`, `Emissive`, `Video`, and `Runtime`: export original source data.
+- `Glass`, `Emissive`, and `Runtime`: export original source data.
 
-`Runtime` contains non-rendered application data such as probe cameras,
-empties, navigation, and collision geometry. Cameras are included in USDZ/GLB
-export; conversion to empties can be added later if needed.
+`Runtime` contains application-driven data such as visual FX/video surfaces,
+SFX placement points, probe cameras, UI anchors, navigation, and collision
+geometry. Cameras are included in USDZ/GLB export; conversion to empties can
+be added later if needed.
+
+Scene Debug lives in Optimize and can be used before pipeline initialization.
+UV Health, Texel Density, Checker, Scale, and Linked Meshes inspect all visible
+scene meshes. Bake Status, Render Layers, and Bake Units become available after
+the semantic pipeline is initialized.
 
 Day uses the base output filename; Evening adds `_Evening`. Export is blocked when
 the current state has no compatible Beauty artifact.

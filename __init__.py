@@ -59,6 +59,7 @@ class PMVR_PT_MainPanel(bpy.types.Panel):
         header.operator("pmvr.project_settings", text="", icon='PREFERENCES')
 
         if ui_state.stage == 'OPTIMIZATION':
+            pipeline.draw_scene_debug(layout, context)
             vr_project_tools.draw_ui(layout, context)
         else:
             pipeline.draw_stage(layout, context, ui_state.stage)

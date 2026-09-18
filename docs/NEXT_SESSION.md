@@ -3,15 +3,17 @@
 ## Unified layer taxonomy
 
 - One authoritative `layer_type` drives both runtime meaning and Blender bake/export behavior; there is no parallel processing-profile entity.
-- Types are Unlit, PBR, Alpha, Translucent, Glass, Emissive, Video, and Runtime.
-- Behavior: Unlit/Translucent bake unlit Beauty; PBR preserves PBR channels; Alpha preserves Alpha; Glass/Emissive/Video/Runtime export originals.
-- New projects initialize these eight general layers instead of the project-specific Scene/Reflect/Translusent/Curtains/Homepod set.
+- Types are Unlit, PBR, Alpha, Translucent, Glass, Emissive, and Runtime.
+- Behavior: Unlit/Translucent bake unlit Beauty; PBR preserves PBR channels; Alpha preserves Alpha; Glass/Emissive/Runtime export originals.
+- New projects initialize these seven general layers instead of the project-specific Scene/Reflect/Translusent/Curtains/Homepod set.
+- Video surfaces are runtime-driven content and belong under `Runtime/FX`; `Runtime/SFX` is reserved for sound-effect placement points. Emissive and Skybox remain distinct visual outputs.
 - The model was not yet in production, so no legacy schema or migration layer is retained.
 - Generated objects, materials, and images store the flat `pmvr_layer_type` custom property. Runtime source metadata still needs a manifest or export proxy for a uniform Mac-side contract.
 - Cameras are now included by both USDZ and GLB exporters, allowing Runtime layers to carry probe-camera transforms directly.
 
 ## Implemented, awaiting live-scene feedback
 
+- Scene Debug now lives only in Optimize. UV Health, Texel Density, Checker, Scale, and Linked Meshes work on all visible scene meshes before project initialization; Bake Status, Render Layers, and Bake Units unlock after Initialize.
 - Bake isolation now excludes every active View Layer instance of `PMVR_GENERATED`, restores its previous state after success/failure/cancellation, and keeps per-object `hide_render` as a fallback.
 - Setup list selection follows the active viewport object through a deferred Blender message-bus update. Registered sources and generated outputs resolve to their semantic render layer and bake unit; Export Original resolves only to its layer.
 - Bake-unit batch selection now uses native independent Bool checkboxes. Every checkbox can be cleared, LMB-drag selection is available, and resolution propagation remains limited to checked units in the same render layer.
