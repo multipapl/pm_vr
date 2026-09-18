@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import bpy
 
-from .constants import BAKE_UV_NAME, PRIMARY_UV_NAME
+from .constants import BAKE_LAYER_TYPES, BAKE_UV_NAME, PRIMARY_UV_NAME
 from .identity import duplicate_source_ids, find_layer, find_unit, layer_members, unit_members
 from .state import PipelineStateError, validate_state_configuration
 
@@ -54,7 +54,7 @@ def validate_unit(context, unit, require_visible=True):
     layer = find_layer(project, unit.render_layer_id)
     if not layer:
         return [Issue('ERROR', f'Unit "{unit.display_name}" has no valid render layer')]
-    if layer.processing_profile == 'EXPORT_ORIGINAL':
+    if layer.layer_type not in BAKE_LAYER_TYPES:
         issues.append(Issue('ERROR', f'Unit "{unit.display_name}" belongs to Export Original layer'))
     members = unit_members(unit.unit_id)
     if not members:
@@ -80,7 +80,7 @@ def validate_unit(context, unit, require_visible=True):
             issues.append(Issue('ERROR', f'Missing UV map "{BAKE_UV_NAME}"', obj.name))
         if not obj.data.uv_layers.get(PRIMARY_UV_NAME):
             issues.append(Issue('ERROR', f'Missing UV map "{PRIMARY_UV_NAME}"', obj.name))
-        if layer.processing_profile in {'BEAUTY_PBR', 'BEAUTY_TRANSLUCENT'}:
+        if layer.layer_type in {'PBR', 'ALPHA'}:
             for slot_index, slot in enumerate(obj.material_slots):
                 material = slot.material
                 principled = (
@@ -95,7 +95,7 @@ def validate_unit(context, unit, require_visible=True):
                         obj.name,
                     ))
                     continue
-                if layer.processing_profile == 'BEAUTY_TRANSLUCENT':
+                if layer.layer_type == 'ALPHA':
                     alpha = principled[0].inputs.get("Alpha")
                     if not alpha or (not alpha.is_linked and alpha.default_value >= 1.0):
                         issues.append(Issue(
@@ -130,7 +130,7 @@ def validate_all(context):
             meta = obj.pm_vr_pipeline
             if obj not in root_objects:
                 issues.append(Issue('ERROR', "Assigned source is outside Source Root", obj.name))
-            if layer.processing_profile == 'EXPORT_ORIGINAL' and meta.processing_role != 'EXPORT_ORIGINAL':
+            if layer.layer_type not in BAKE_LAYER_TYPES and meta.processing_role != 'EXPORT_ORIGINAL':
                 issues.append(Issue('ERROR', "Export Original layer contains a non-original role", obj.name))
             if obj.type == 'EMPTY' and meta.processing_role != 'EXPORT_ORIGINAL':
                 issues.append(Issue('ERROR', "Empty must use Export Original", obj.name))

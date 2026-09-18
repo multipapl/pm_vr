@@ -1,17 +1,24 @@
 """Constants shared by the PM VR production pipeline."""
 
+from ..scene_diagnostics import BAKE_UV_NAME, PRIMARY_UV_NAME
+
 SCHEMA_VERSION = 1
-BAKE_UV_NAME = "SimpleBake"
-PRIMARY_UV_NAME = "UVMap"
 GENERATED_COLLECTION = "PMVR_GENERATED"
 WORK_COLLECTION = "PMVR_WORK"
 
-PROFILE_ITEMS = (
-    ('BEAUTY_SCENE', "Scene / Beauty", "Bake a simple unlit-looking Beauty material"),
-    ('BEAUTY_PBR', "PBR / Beauty", "Bake Base Color and preserve original PBR channels"),
-    ('BEAUTY_TRANSLUCENT', "Translucent / Beauty", "Bake Base Color and preserve original Alpha"),
-    ('EXPORT_ORIGINAL', "Export Original", "Export source objects without baking"),
+LAYER_TYPE_ITEMS = (
+    ('UNLIT', "Unlit", "Fully baked unlit-looking renderable content"),
+    ('PBR', "PBR", "Baked Base Color with preserved PBR channels"),
+    ('ALPHA', "Alpha", "Renderable content using an alpha channel, such as foliage"),
+    ('TRANSLUCENT', "Translucent", "Light-transmitting fabrics and curtains"),
+    ('GLASS', "Glass", "Original transparent or refractive geometry"),
+    ('EMISSIVE', "Emissive", "Original emissive renderable content"),
+    ('VIDEO', "Video", "Original geometry driven by video content"),
+    ('RUNTIME', "Runtime", "Non-rendered runtime data such as probes, anchors, navigation, and collisions"),
 )
+
+UNLIT_LAYER_TYPES = frozenset({'UNLIT', 'TRANSLUCENT'})
+BAKE_LAYER_TYPES = frozenset((*UNLIT_LAYER_TYPES, 'PBR', 'ALPHA'))
 
 ROLE_ITEMS = (
     ('UNASSIGNED', "Unassigned", "Object has not been assigned a pipeline role"),
@@ -34,6 +41,22 @@ MODE_ITEMS = (
     ('LIGHTMAP', "Lightmap", "Classic Blender-side diffuse lightmap"),
 )
 
+DEBUG_MODE_ITEMS = (
+    ('BAKE_STATUS', "Bake Status", "Show missing, existing, and session bake results"),
+    ('RENDER_LAYERS', "Render Layers", "Color objects by semantic render layer"),
+    ('BAKE_UNITS', "Bake Units", "Color objects by their bake unit"),
+    ('UV_HEALTH', "UV Health", "Show invalid and missing pipeline UV channels"),
+    ('TEXEL_DENSITY', "Texel Density", "Show SimpleBake texel density against the project target"),
+    ('UV_CHECKER', "Checker", "Preview the PM VR checker through a selected UV channel"),
+    ('SCALE_CHECK', "Scale Check", "Highlight objects with unapplied scale"),
+    ('LINKED_MESHES', "Linked Meshes", "Highlight objects that share mesh data"),
+)
+
+DEBUG_OVERLAY_ITEMS = (
+    ('OFF', "Off", "Disable the PM VR viewport overlay"),
+    *DEBUG_MODE_ITEMS,
+)
+
 LAYER_COLOR_PALETTE = (
     (0.74, 0.08, 0.92),
     (0.04, 0.86, 0.24),
@@ -49,6 +72,7 @@ TAG_GENERATED = "pmvr_generated"
 TAG_SOURCE_ID = "pmvr_source_id"
 TAG_UNIT_ID = "pmvr_unit_id"
 TAG_LAYER_ID = "pmvr_layer_id"
+TAG_LAYER_TYPE = "pmvr_layer_type"
 TAG_MODE = "pmvr_mode"
 TAG_STATE = "pmvr_state"
 TAG_SCHEMA = "pmvr_schema"

@@ -4,8 +4,19 @@ import math
 
 import bpy
 
-from ..vr_project_tools import get_mesh_areas, get_target_td
-from .constants import GENERATED_COLLECTION, LAYER_COLOR_PALETTE, RESOLUTION_ITEMS, ROLE_ITEMS, SCHEMA_VERSION, TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID
+from ..scene_diagnostics import get_target_td, measure_texel_areas
+from .constants import (
+    GENERATED_COLLECTION,
+    LAYER_COLOR_PALETTE,
+    RESOLUTION_ITEMS,
+    ROLE_ITEMS,
+    SCHEMA_VERSION,
+    BAKE_LAYER_TYPES,
+    TAG_GENERATED,
+    TAG_MODE,
+    TAG_SOURCE_ID,
+    TAG_UNIT_ID,
+)
 from .identity import (
     ensure_project_id,
     ensure_source_id,
@@ -31,7 +42,7 @@ def suggested_unit_resolution(context, objects):
     target_td = get_target_td(context)
     required = []
     for obj in objects:
-        mesh_area_cm2, uv_area, error = get_mesh_areas(obj)
+        mesh_area_cm2, uv_area, error = measure_texel_areas(context, obj)
         if error or mesh_area_cm2 <= 0.0 or uv_area <= 0.0:
             log.warning(
                 "Setup",
@@ -75,12 +86,12 @@ def active_unit(project):
     return None
 
 
-def add_layer(project, name="Render Layer", profile='BEAUTY_SCENE'):
+def add_layer(project, name="Unlit", layer_type='UNLIT'):
     layer = project.render_layers.add()
     layer.layer_id = new_id()
     layer.display_name = name
     layer.output_base_name = safe_stem(name)
-    layer.processing_profile = profile
+    layer.layer_type = layer_type
     layer.viewport_color = LAYER_COLOR_PALETTE[
         (len(project.render_layers) - 1) % len(LAYER_COLOR_PALETTE)
     ]
@@ -100,14 +111,18 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
         ensure_project_id(project)
         project.schema_version = SCHEMA_VERSION
         if not project.render_layers:
-            for name, profile in (
-                ("Scene", 'BEAUTY_SCENE'),
-                ("PBR", 'BEAUTY_PBR'),
-                ("Curtains", 'BEAUTY_SCENE'),
-                ("Homepod", 'BEAUTY_SCENE'),
-                ("Translusent", 'BEAUTY_TRANSLUCENT'),
+            for name, layer_type in (
+                ("Unlit", 'UNLIT'),
+                ("PBR", 'PBR'),
+                ("Alpha", 'ALPHA'),
+                ("Translucent", 'TRANSLUCENT'),
+                ("Glass", 'GLASS'),
+                ("Emissive", 'EMISSIVE'),
+                ("Video", 'VIDEO'),
+                ("Runtime", 'RUNTIME'),
             ):
-                add_layer(project, name, profile)
+                add_layer(project, name, layer_type)
+            project.active_render_layer_index = 0
         self.report({'INFO'}, "PM VR pipeline project initialized")
         return {'FINISHED'}
 
@@ -164,7 +179,7 @@ class PMVR_OT_AssignSelectedToLayer(bpy.types.Operator):
     def execute(self, context):
         project = context.scene.pm_vr_project
         layer = active_layer(project)
-        role = 'EXPORT_ORIGINAL' if layer.processing_profile == 'EXPORT_ORIGINAL' else self.role
+        role = 'EXPORT_ORIGINAL' if layer.layer_type not in BAKE_LAYER_TYPES else self.role
         assigned = 0
         for obj in context.selected_objects:
             if obj.get(TAG_GENERATED):
@@ -218,7 +233,7 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
     def execute(self, context):
         project = context.scene.pm_vr_project
         layer = active_layer(project)
-        if layer.processing_profile == 'EXPORT_ORIGINAL':
+        if layer.layer_type not in BAKE_LAYER_TYPES:
             self.report({'ERROR'}, "Export Original layers cannot contain bake units")
             return {'CANCELLED'}
         members = []
@@ -378,7 +393,7 @@ class PMVR_OT_RemoveBakeUnit(bpy.types.Operator):
         unit = active_unit(project)
         generated_objects = [
             obj for obj in bpy.data.objects
-            if obj.get(TAG_GENERATED) and obj.get("pmvr_unit_id") == unit.unit_id
+            if obj.get(TAG_GENERATED) and obj.get(TAG_UNIT_ID) == unit.unit_id
         ]
         for generated in generated_objects:
             mesh = generated.data if generated.type == 'MESH' else None
@@ -386,10 +401,18 @@ class PMVR_OT_RemoveBakeUnit(bpy.types.Operator):
             if mesh and mesh.users == 0:
                 bpy.data.meshes.remove(mesh)
         for material in list(bpy.data.materials):
-            if material.get(TAG_GENERATED) and material.get("pmvr_unit_id") == unit.unit_id and material.users == 0:
+            if (
+                material.get(TAG_GENERATED)
+                and material.get(TAG_UNIT_ID) == unit.unit_id
+                and material.users == 0
+            ):
                 bpy.data.materials.remove(material)
         for image in list(bpy.data.images):
-            if image.get(TAG_GENERATED) and image.get("pmvr_unit_id") == unit.unit_id and image.users == 0:
+            if (
+                image.get(TAG_GENERATED)
+                and image.get(TAG_UNIT_ID) == unit.unit_id
+                and image.users == 0
+            ):
                 bpy.data.images.remove(image)
         for obj in unit_members(unit.unit_id):
             obj.pm_vr_pipeline.bake_unit_id = ""
@@ -608,7 +631,7 @@ class PMVR_OT_SelectPipelineItems(bpy.types.Operator):
                 obj for obj in bpy.data.objects
                 if unit
                 and obj.get(TAG_GENERATED)
-                and obj.get("pmvr_unit_id") == unit.unit_id
+                and obj.get(TAG_UNIT_ID) == unit.unit_id
                 and obj.get(TAG_MODE) == project.bake_mode
             ]
         else:

@@ -1,6 +1,8 @@
 """Non-destructive transparent viewport overlays for pipeline state."""
 
 from collections import Counter
+import colorsys
+import hashlib
 import math
 
 import blf
@@ -11,9 +13,15 @@ from bpy.app.handlers import persistent
 from gpu_extras.batch import batch_for_shader
 
 from .. import checker_preview
-from ..vr_project_tools import CM_PER_BLEND_UNIT, get_target_td
+from ..scene_diagnostics import (
+    get_target_td,
+    has_applied_scale,
+    has_pipeline_uvs,
+    measure_texel_areas,
+)
 from .constants import (
     BAKE_UV_NAME,
+    BAKE_LAYER_TYPES,
     LAYER_COLOR_PALETTE,
     PRIMARY_UV_NAME,
     TAG_GENERATED,
@@ -29,13 +37,18 @@ STATUS_COLORS = {
     'UV_INVALID': (0.96, 0.035, 0.025),
     'UV_VALID': (0.04, 0.78, 0.13),
     'UV_NOT_REQUIRED': (0.30, 0.34, 0.38),
-    'TD_LOW': (0.03, 0.25, 1.00),
-    'TD_OK': (0.04, 0.85, 0.13),
-    'TD_HIGH': (0.96, 0.05, 0.02),
+    'TD_BAD': (0.96, 0.05, 0.02),
+    'TD_ACCEPTABLE': (1.00, 0.72, 0.02),
+    'TD_GREAT': (0.04, 0.85, 0.13),
     'TD_INVALID': (1.00, 0.02, 0.55),
     'TD_NOT_REQUIRED': (0.30, 0.34, 0.38),
     'CHECKER': (1.00, 1.00, 1.00),
     'CHECKER_MISSING': (1.00, 0.02, 0.55),
+    'SCALE_INVALID': (0.96, 0.035, 0.025),
+    'SCALE_OK': (0.04, 0.78, 0.13),
+    'UNIT_UNASSIGNED': (0.30, 0.34, 0.38),
+    'LINKED_INVALID': (0.96, 0.035, 0.025),
+    'LINKED_OK': (0.04, 0.78, 0.13),
 }
 STATUS_ALPHA = {
     'MISSING': 1.00,
@@ -46,13 +59,18 @@ STATUS_ALPHA = {
     'UV_INVALID': 1.00,
     'UV_VALID': 0.35,
     'UV_NOT_REQUIRED': 0.12,
-    'TD_LOW': 1.00,
-    'TD_OK': 0.75,
-    'TD_HIGH': 1.00,
+    'TD_BAD': 1.00,
+    'TD_ACCEPTABLE': 0.90,
+    'TD_GREAT': 0.75,
     'TD_INVALID': 1.00,
     'TD_NOT_REQUIRED': 0.12,
     'CHECKER': 1.00,
     'CHECKER_MISSING': 1.00,
+    'SCALE_INVALID': 1.00,
+    'SCALE_OK': 0.0,
+    'UNIT_UNASSIGNED': 0.12,
+    'LINKED_INVALID': 1.00,
+    'LINKED_OK': 0.0,
 }
 STATUS_LABELS = {
     'MISSING': "Missing",
@@ -63,13 +81,18 @@ STATUS_LABELS = {
     'UV_INVALID': "Invalid / Missing",
     'UV_VALID': "Valid",
     'UV_NOT_REQUIRED': "Not Required",
-    'TD_LOW': "Below Target",
-    'TD_OK': "Near Target",
-    'TD_HIGH': "Above Target",
+    'TD_BAD': "Bad",
+    'TD_ACCEPTABLE': "Acceptable",
+    'TD_GREAT': "Great",
     'TD_INVALID': "Invalid UV / Geometry",
     'TD_NOT_REQUIRED': "Not Required",
     'CHECKER': "Checker",
     'CHECKER_MISSING': "Selected UV Missing",
+    'SCALE_INVALID': "Unapplied Scale",
+    'SCALE_OK': "Applied",
+    'UNIT_UNASSIGNED': "No Bake Unit",
+    'LINKED_INVALID': "Shared Mesh Data",
+    'LINKED_OK': "Single User",
 }
 
 _view_handle = None
@@ -84,6 +107,7 @@ _texel_area_cache = {}
 _session_bakes = set()
 _last_draw_error = ""
 _last_legend_error = ""
+_uv_message_owner = object()
 
 
 def tag_redraw():
@@ -95,6 +119,11 @@ def tag_redraw():
         for area in screen.areas:
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
+
+
+def invalidate_texel_cache():
+    _texel_area_cache.clear()
+    tag_redraw()
 
 
 def ensure_layer_colors(project):
@@ -173,24 +202,54 @@ def _is_visible(obj, context):
         return False
 
 
-def _mix_color(first, second, factor):
-    factor = max(0.0, min(1.0, factor))
-    return tuple(a + ((b - a) * factor) for a, b in zip(first, second))
+def _unit_color(unit_id):
+    digest = hashlib.sha1(unit_id.encode("utf-8")).digest()
+    hue = int.from_bytes(digest[:2], "big") / 65535.0
+    saturation = 0.58 + (digest[2] / 255.0) * 0.22
+    value = 0.82 + (digest[3] / 255.0) * 0.16
+    return colorsys.hsv_to_rgb(hue, saturation, value)
 
 
-def _texel_gradient(ratio):
-    stops_from_target = math.log2(max(1.0e-6, ratio))
-    if stops_from_target < 0.0:
-        return _mix_color(
-            STATUS_COLORS['TD_LOW'],
-            STATUS_COLORS['TD_OK'],
-            stops_from_target + 1.0,
-        )
-    return _mix_color(
-        STATUS_COLORS['TD_OK'],
-        STATUS_COLORS['TD_HIGH'],
-        stops_from_target,
+def _object_resolution(project, metadata, layer, units):
+    unit = units.get(metadata.bake_unit_id)
+    if (
+        metadata.is_registered_source
+        and layer
+        and metadata.processing_role == 'BAKE'
+        and unit
+        and unit.render_layer_id == layer.layer_id
+    ):
+        return int(unit.resolution)
+    return int(project.default_unit_resolution)
+
+
+def _is_export_original(metadata, layer):
+    return bool(
+        metadata.processing_role == 'EXPORT_ORIGINAL'
+        or (layer and layer.layer_type not in BAKE_LAYER_TYPES)
     )
+
+
+def _active_texel_summary(context, project):
+    obj = context.active_object
+    if not obj or obj.type != 'MESH' or not obj.data or obj.get(TAG_GENERATED):
+        return ""
+    metadata = getattr(obj, "pm_vr_pipeline", None)
+    if metadata is None:
+        return ""
+    layers = {layer.layer_id: layer for layer in project.render_layers}
+    units = {unit.unit_id: unit for unit in project.bake_units}
+    resolution = _object_resolution(
+        project,
+        metadata,
+        layers.get(metadata.render_layer_id),
+        units,
+    )
+    mesh_area_cm2, uv_area, error = _texel_areas(context, obj)
+    if error or mesh_area_cm2 <= 0.0 or uv_area <= 0.0:
+        return "Active invalid"
+    actual = resolution * math.sqrt(uv_area / mesh_area_cm2)
+    return f"Active {actual:.2f} px/cm @ {resolution}"
 
 
 def _texel_areas(context, obj):
@@ -210,83 +269,7 @@ def _texel_areas(context, obj):
     if cached and cached[0] == signature:
         return cached[1:]
 
-    depsgraph = context.evaluated_depsgraph_get()
-    evaluated = obj.evaluated_get(depsgraph)
-    mesh = evaluated.to_mesh(
-        preserve_all_data_layers=True,
-        depsgraph=depsgraph,
-    )
-    mesh_area_cm2 = 0.0
-    uv_area = 0.0
-    error = None
-    try:
-        if not mesh or not mesh.polygons:
-            error = "no polygons"
-        else:
-            uv_layer = mesh.uv_layers[1] if len(mesh.uv_layers) >= 2 else None
-            if uv_layer is None:
-                error = "second UV channel not found"
-            elif uv_layer.name != BAKE_UV_NAME:
-                error = (
-                    f'second UV channel is "{uv_layer.name}"; '
-                    f'expected "{BAKE_UV_NAME}"'
-                )
-            else:
-                mesh.calc_loop_triangles()
-                triangle_count = len(mesh.loop_triangles)
-                positions = np.empty((len(mesh.vertices), 3), dtype=np.float64)
-                mesh.vertices.foreach_get("co", positions.ravel())
-                transform = np.asarray(evaluated.matrix_world, dtype=np.float64)
-                positions = (
-                    positions @ transform[:3, :3].T
-                    + transform[:3, 3]
-                )
-
-                vertex_indices = np.empty(
-                    (triangle_count, 3),
-                    dtype=np.int32,
-                )
-                mesh.loop_triangles.foreach_get(
-                    "vertices",
-                    vertex_indices.ravel(),
-                )
-                triangles = positions[vertex_indices]
-                cross_products = np.cross(
-                    triangles[:, 1] - triangles[:, 0],
-                    triangles[:, 2] - triangles[:, 0],
-                )
-                world_area_bu2 = float(
-                    np.linalg.norm(cross_products, axis=1).sum() * 0.5
-                )
-
-                uv_coordinates = np.empty(
-                    (len(mesh.loops), 2),
-                    dtype=np.float64,
-                )
-                uv_layer.data.foreach_get("uv", uv_coordinates.ravel())
-                loop_indices = np.empty(
-                    (triangle_count, 3),
-                    dtype=np.int32,
-                )
-                mesh.loop_triangles.foreach_get("loops", loop_indices.ravel())
-                uv_triangles = uv_coordinates[loop_indices]
-                first = uv_triangles[:, 1] - uv_triangles[:, 0]
-                second = uv_triangles[:, 2] - uv_triangles[:, 0]
-                uv_area = float(
-                    np.abs(
-                        (first[:, 0] * second[:, 1])
-                        - (first[:, 1] * second[:, 0])
-                    ).sum() * 0.5
-                )
-
-                scene_scale = max(
-                    1.0e-9,
-                    float(context.scene.unit_settings.scale_length),
-                )
-                cm_per_blend_unit = CM_PER_BLEND_UNIT * scene_scale
-                mesh_area_cm2 = world_area_bu2 * (cm_per_blend_unit ** 2)
-    finally:
-        evaluated.to_mesh_clear()
+    mesh_area_cm2, uv_area, error = measure_texel_areas(context, obj)
     _texel_area_cache[key] = (
         signature,
         mesh_area_cm2,
@@ -300,62 +283,42 @@ def _classify(context, project, obj, layers, units):
     metadata = obj.pm_vr_pipeline
     layer = layers.get(metadata.render_layer_id)
 
+    if project.overlay_mode == 'SCALE_CHECK':
+        valid = has_applied_scale(obj)
+        token = 'SCALE_OK' if valid else 'SCALE_INVALID'
+        return token, STATUS_COLORS[token]
+
+    if project.overlay_mode == 'LINKED_MESHES':
+        token = 'LINKED_INVALID' if obj.data.users > 1 else 'LINKED_OK'
+        return token, STATUS_COLORS[token]
+
     if project.overlay_mode == 'UV_HEALTH':
-        no_bake = (
-            metadata.processing_role == 'EXPORT_ORIGINAL'
-            or (
-                layer
-                and layer.processing_profile == 'EXPORT_ORIGINAL'
-            )
-        )
-        if no_bake:
+        if _is_export_original(metadata, layer):
             return 'UV_NOT_REQUIRED', STATUS_COLORS['UV_NOT_REQUIRED']
-        uv_layers = obj.data.uv_layers
-        valid = bool(
-            len(uv_layers) >= 2
-            and uv_layers[0].name == PRIMARY_UV_NAME
-            and uv_layers[1].name == BAKE_UV_NAME
-        )
+        valid = has_pipeline_uvs(obj.data)
         token = 'UV_VALID' if valid else 'UV_INVALID'
         return token, STATUS_COLORS[token]
 
     if project.overlay_mode == 'TEXEL_DENSITY':
-        no_bake = (
-            metadata.processing_role == 'EXPORT_ORIGINAL'
-            or (
-                layer
-                and layer.processing_profile == 'EXPORT_ORIGINAL'
-            )
-        )
-        if no_bake:
+        if _is_export_original(metadata, layer):
             return 'TD_NOT_REQUIRED', STATUS_COLORS['TD_NOT_REQUIRED']
-        unit = units.get(metadata.bake_unit_id)
-        has_unit_resolution = bool(
-            metadata.is_registered_source
-            and layer
-            and metadata.processing_role == 'BAKE'
-            and unit
-            and unit.render_layer_id == layer.layer_id
-        )
-        resolution = (
-            int(unit.resolution)
-            if has_unit_resolution
-            else int(project.default_unit_resolution)
-        )
+        resolution = _object_resolution(project, metadata, layer, units)
         mesh_area_cm2, uv_area, error = _texel_areas(context, obj)
         if error or mesh_area_cm2 <= 0.0 or uv_area <= 0.0:
             return 'TD_INVALID', STATUS_COLORS['TD_INVALID']
         target = max(1.0e-6, float(get_target_td(context)))
         actual = resolution * math.sqrt(uv_area / mesh_area_cm2)
         ratio = actual / target
-        stops_from_target = math.log2(max(1.0e-6, ratio))
-        if stops_from_target < -0.25:
-            token = 'TD_LOW'
-        elif stops_from_target > 0.25:
-            token = 'TD_HIGH'
+        # Density quality is monotonic for production: exceeding the minimum
+        # target remains good. Memory efficiency is a separate concern and
+        # must not make a denser object look worse than a sparser one.
+        if ratio >= 1.0:
+            token = 'TD_GREAT'
+        elif ratio >= 0.5:
+            token = 'TD_ACCEPTABLE'
         else:
-            token = 'TD_OK'
-        return token, _texel_gradient(ratio)
+            token = 'TD_BAD'
+        return token, STATUS_COLORS[token]
 
     if project.overlay_mode == 'UV_CHECKER':
         uv_index = 0 if project.debug_checker_uv == 'PRIMARY' else 1
@@ -369,10 +332,13 @@ def _classify(context, project, obj, layers, units):
     if project.overlay_mode == 'RENDER_LAYERS':
         return f"LAYER:{layer.layer_id}", tuple(layer.viewport_color)
 
-    if (
-        metadata.processing_role == 'EXPORT_ORIGINAL'
-        or layer.processing_profile == 'EXPORT_ORIGINAL'
-    ):
+    if project.overlay_mode == 'BAKE_UNITS':
+        unit = units.get(metadata.bake_unit_id)
+        if metadata.processing_role != 'BAKE' or not unit:
+            return 'UNIT_UNASSIGNED', STATUS_COLORS['UNIT_UNASSIGNED']
+        return f"UNIT:{unit.unit_id}", _unit_color(unit.unit_id)
+
+    if _is_export_original(metadata, layer):
         return 'NO_BAKE', STATUS_COLORS['NO_BAKE']
     if metadata.processing_role != 'BAKE':
         return 'UNASSIGNED', STATUS_COLORS['UNASSIGNED']
@@ -403,7 +369,12 @@ def _collect_items(context):
             continue
         token, color = _classify(context, project, obj, layers, units)
         counts[token] += 1
-        if token == 'UNASSIGNED' and not project.overlay_show_unassigned:
+        if (
+            token in {'UNASSIGNED', 'UNIT_UNASSIGNED'}
+            and not project.overlay_show_unassigned
+        ):
+            continue
+        if token in {'SCALE_OK', 'LINKED_OK'}:
             continue
         alpha_scale = STATUS_ALPHA.get(token, 1.0)
         base_alpha = 0.05 + (project.overlay_opacity * 0.35)
@@ -456,6 +427,7 @@ def _checker_shader():
         shader_info.push_constant('MAT4', "modelViewProjectionMatrix")
         shader_info.push_constant('FLOAT', "tiling")
         shader_info.push_constant('FLOAT', "opacity")
+        shader_info.push_constant('FLOAT', "bakeResolution")
         shader_info.sampler(0, 'FLOAT_2D', "checkerTexture")
         shader_info.vertex_in(0, 'VEC3', "pos")
         shader_info.vertex_in(1, 'VEC2', "uv")
@@ -471,7 +443,10 @@ def _checker_shader():
         shader_info.fragment_source("""
         void main()
         {
-            vec4 checker = texture(checkerTexture, fract(checkerUV * tiling));
+            vec2 pixelUV = (
+                floor(checkerUV * bakeResolution) + vec2(0.5)
+            ) / bakeResolution;
+            vec4 checker = texture(checkerTexture, fract(pixelUV * tiling));
             fragColor = vec4(checker.rgb, opacity * checker.a);
             gl_FragDepth = max(0.0, gl_FragCoord.z - 0.00000024);
         }
@@ -613,18 +588,29 @@ def _draw_checker_items(items, context, project):
     shader.uniform_sampler("checkerTexture", texture)
     shader.uniform_float("tiling", tiling)
     shader.uniform_float("opacity", opacity)
+    layers = {layer.layer_id: layer for layer in project.render_layers}
+    units = {unit.unit_id: unit for unit in project.bake_units}
     gpu.state.face_culling_set('BACK')
     for obj, _color, _token in items:
         batch = _checker_batch(obj, depsgraph, uv_index)
         if not batch:
             continue
         evaluated = obj.evaluated_get(depsgraph)
+        metadata = obj.pm_vr_pipeline
+        resolution = _object_resolution(
+            project,
+            metadata,
+            layers.get(metadata.render_layer_id),
+            units,
+        )
         gpu.state.front_facing_set(evaluated.matrix_world.determinant() < 0.0)
         shader.uniform_float(
             "modelViewProjectionMatrix",
             context.region_data.perspective_matrix @ evaluated.matrix_world,
         )
+        shader.uniform_float("bakeResolution", float(resolution))
         batch.draw(shader)
+
 
 def _draw_view():
     global _last_draw_error
@@ -709,9 +695,9 @@ def _legend_lines(context, project, counts):
     if project.overlay_mode == 'TEXEL_DENSITY':
         entries = []
         for token in (
-            'TD_LOW',
-            'TD_OK',
-            'TD_HIGH',
+            'TD_BAD',
+            'TD_ACCEPTABLE',
+            'TD_GREAT',
             'TD_INVALID',
             'TD_NOT_REQUIRED',
         ):
@@ -721,8 +707,10 @@ def _legend_lines(context, project, counts):
                 )
         target = float(get_target_td(context))
         default_resolution = int(project.default_unit_resolution)
+        active = _active_texel_summary(context, project)
+        resolution_label = active or f"Default {default_resolution}"
         return (
-            f"Texel Density · {target:.1f} px/cm · Default {default_resolution}",
+            f"Texel Density · Target {target:.1f} · {resolution_label}",
             entries,
         )
 
@@ -746,7 +734,44 @@ def _legend_lines(context, project, counts):
                 )
             )
         tiling = int(getattr(context.scene, "pm_vr_checker_tiling", 1))
-        return f"UV Checker · {uv_name} · Tiling {tiling}", entries
+        return (
+            f"UV Checker · {uv_name} · Tiling {tiling} · Unit Resolution",
+            entries,
+        )
+
+    if project.overlay_mode == 'SCALE_CHECK':
+        entries = []
+        if counts['SCALE_INVALID']:
+            entries.append((
+                STATUS_LABELS['SCALE_INVALID'],
+                counts['SCALE_INVALID'],
+                STATUS_COLORS['SCALE_INVALID'],
+            ))
+        return "Scale Check · only problems are filled", entries
+
+    if project.overlay_mode == 'LINKED_MESHES':
+        entries = []
+        if counts['LINKED_INVALID']:
+            entries.append((
+                STATUS_LABELS['LINKED_INVALID'],
+                counts['LINKED_INVALID'],
+                STATUS_COLORS['LINKED_INVALID'],
+            ))
+        return "Linked Meshes · only shared data is filled", entries
+
+    if project.overlay_mode == 'BAKE_UNITS':
+        entries = []
+        for unit in project.bake_units:
+            count = counts[f"UNIT:{unit.unit_id}"]
+            if count:
+                entries.append((unit.display_name, count, _unit_color(unit.unit_id)))
+        if counts['UNIT_UNASSIGNED']:
+            entries.append((
+                STATUS_LABELS['UNIT_UNASSIGNED'],
+                counts['UNIT_UNASSIGNED'],
+                STATUS_COLORS['UNIT_UNASSIGNED'],
+            ))
+        return "Bake Units", entries
 
     title = "Render Layers"
     entries = []
@@ -802,12 +827,15 @@ def _draw_pixel():
         gpu.state.blend_set('ALPHA')
         _items, counts = _collect_items(context)
         title, entries = _legend_lines(context, project, counts)
-        controls_primary = "1 Bake   2 Layers   3 UV   4 Texel   5 Checker"
+        controls_primary = (
+            "1 Bake   2 Layers   3 Units   4 UV",
+            "5 TD   6 Checker   7 Scale   8 Linked",
+        )
         controls_secondary = "[ / ] Cycle   Esc Exit   Ctrl Shift D Toggle"
         x = 20
         visible_entries = entries[:10]
         height = (
-            157
+            182
             + (29 * len(visible_entries))
             + (29 if len(entries) > 10 else 0)
         )
@@ -815,9 +843,9 @@ def _draw_pixel():
         content_widths = [
             _text_width(title, 22),
             _text_width("Debug Controls", 17),
-            _text_width(controls_primary, 16),
             _text_width(controls_secondary, 15),
         ]
+        content_widths.extend(_text_width(line, 16) for line in controls_primary)
         content_widths.extend(
             _text_width(f"{label}: {count}", 18) + 29
             for label, count, _color in visible_entries
@@ -854,14 +882,15 @@ def _draw_pixel():
         y -= 9
         _draw_text(x, y, "Debug Controls", (1.0, 1.0, 1.0, 0.95), 17)
         y -= 27
-        _draw_text(
-            x,
-            y,
-            controls_primary,
-            (0.88, 0.88, 0.88, 0.92),
-            16,
-        )
-        y -= 25
+        for line in controls_primary:
+            _draw_text(
+                x,
+                y,
+                line,
+                (0.88, 0.88, 0.88, 0.92),
+                16,
+            )
+            y -= 25
         _draw_text(
             x,
             y,
@@ -900,19 +929,26 @@ def _depsgraph_update(_scene, depsgraph):
     dirty_objects = set()
     dirty_meshes = set()
     for update in depsgraph.updates:
-        if not getattr(update, "is_updated_geometry", False):
-            continue
         datablock = getattr(update.id, "original", update.id)
-        if isinstance(datablock, bpy.types.Object):
-            dirty_objects.add(datablock.as_pointer())
-        elif isinstance(datablock, bpy.types.Mesh):
+        # UV edits update the Mesh ID but are not consistently reported as
+        # is_updated_geometry. Treat every Mesh update as cache-invalidating.
+        if isinstance(datablock, bpy.types.Mesh):
             dirty_meshes.add(datablock.as_pointer())
+        elif (
+            isinstance(datablock, bpy.types.Object)
+            and getattr(update, "is_updated_geometry", False)
+        ):
+            dirty_objects.add(datablock.as_pointer())
     if not dirty_objects and not dirty_meshes:
         return
+    for key, entry in tuple(_texel_area_cache.items()):
+        signature = entry[0]
+        mesh_pointer = signature[0]
+        if key in dirty_objects or mesh_pointer in dirty_meshes:
+            _texel_area_cache.pop(key, None)
     for key, entry in tuple(_surface_batch_cache.items()):
         if key in dirty_objects or entry["mesh_pointer"] in dirty_meshes:
             _surface_batch_cache.pop(key, None)
-            _texel_area_cache.pop(key, None)
     for key, entry in tuple(_checker_batch_cache.items()):
         object_pointer = key[0]
         if object_pointer in dirty_objects or entry["mesh_pointer"] in dirty_meshes:
@@ -933,6 +969,15 @@ def register():
         bpy.app.handlers.load_post.append(_load_post)
     if _depsgraph_update not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_depsgraph_update)
+    mesh_uv_loop = getattr(bpy.types, "MeshUVLoop", None)
+    if mesh_uv_loop is not None:
+        bpy.msgbus.clear_by_owner(_uv_message_owner)
+        bpy.msgbus.subscribe_rna(
+            key=(mesh_uv_loop, "uv"),
+            owner=_uv_message_owner,
+            args=(),
+            notify=invalidate_texel_cache,
+        )
     scenes = getattr(bpy.data, "scenes", None)
     if scenes is not None:
         for scene in scenes:
@@ -954,6 +999,7 @@ def unregister():
         bpy.app.handlers.load_post.remove(_load_post)
     if _depsgraph_update in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_update)
+    bpy.msgbus.clear_by_owner(_uv_message_owner)
     _surface_batch_cache.clear()
     _checker_batch_cache.clear()
     _texel_area_cache.clear()

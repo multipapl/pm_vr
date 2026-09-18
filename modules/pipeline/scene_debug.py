@@ -4,15 +4,18 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import viewport_overlay
+from .constants import DEBUG_MODE_ITEMS
 
 
-DEBUG_MODES = (
-    'BAKE_STATUS',
-    'RENDER_LAYERS',
-    'UV_HEALTH',
-    'TEXEL_DENSITY',
-    'UV_CHECKER',
-)
+DEBUG_MODES = tuple(item[0] for item in DEBUG_MODE_ITEMS)
+DEBUG_MODE_LABELS = {identifier: label for identifier, label, _description in DEBUG_MODE_ITEMS}
+DIRECT_MODE_KEYS = {
+    key: mode
+    for key, mode in zip(
+        ('ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT'),
+        DEBUG_MODES,
+    )
+}
 
 _operator_running = False
 _stop_requested = False
@@ -29,21 +32,12 @@ def draw_controls(layout, context, project):
         text="Stop Debug" if _operator_running else "Start Debug",
         depress=_operator_running,
     )
-    modes = box.row(align=True)
-    for mode, text, icon in (
-        ('BAKE_STATUS', "Bake", 'RENDER_STILL'),
-        ('RENDER_LAYERS', "Layers", 'RENDERLAYERS'),
-        ('UV_HEALTH', "UV", 'GROUP_UVS'),
-        ('TEXEL_DENSITY', "TD", 'MOD_UVPROJECT'),
-        ('UV_CHECKER', "Checker", 'TEXTURE'),
-    ):
-        operator = modes.operator(
-            PMVR_OT_SceneDebugSetMode.bl_idname,
-            text=text,
-            icon=icon,
-            depress=project.overlay_mode == mode,
-        )
-        operator.mode = mode
+    box.operator_menu_enum(
+        PMVR_OT_SceneDebugSetMode.bl_idname,
+        "mode",
+        text=DEBUG_MODE_LABELS.get(project.overlay_mode, "Choose Mode"),
+        icon='DOWNARROW_HLT',
+    )
     if project.overlay_mode == 'OFF':
         return
 
@@ -52,18 +46,14 @@ def draw_controls(layout, context, project):
         box.row(align=True).prop(project, "debug_checker_uv", expand=True)
         if hasattr(context.scene, "pm_vr_checker_tiling"):
             box.prop(context.scene, "pm_vr_checker_tiling", text="Tiling")
-    if project.overlay_mode not in {
-        'UV_HEALTH',
-        'TEXEL_DENSITY',
-        'UV_CHECKER',
-    }:
+    if project.overlay_mode in {'BAKE_STATUS', 'RENDER_LAYERS', 'BAKE_UNITS'}:
         box.prop(project, "overlay_show_unassigned", toggle=True)
     if project.overlay_mode == 'BAKE_STATUS':
         state = project.active_lighting_state.title()
         mode = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
         box.label(text=f"Showing {state} · {mode}", icon='INFO')
     if _operator_running:
-        box.label(text="1 Bake · 2 Layers · 3 UV · 4 TD · 5 Checker")
+        box.label(text="1–8 switch modes · [ ] cycle · Esc exit")
 
 
 def _set_status_text(context, text=None):
@@ -86,6 +76,8 @@ def _set_mode(context, mode):
         return False
     if mode == 'UV_CHECKER':
         viewport_overlay.prepare_checker()
+    if mode == 'TEXEL_DENSITY':
+        viewport_overlay.invalidate_texel_cache()
     project.overlay_mode = mode
     viewport_overlay.tag_redraw()
     return True
@@ -126,7 +118,8 @@ class PMVR_OT_SceneDebugToggle(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         _set_status_text(
             context,
-            "PM VR Scene Debug  |  1 Bake  2 Layers  3 UV  4 TD  5 Checker  "
+            "PM VR Scene Debug  |  1 Bake  2 Layers  3 Units  4 UV  "
+            "5 TD  6 Checker  7 Scale  8 Linked  "
             "[ ] Cycle  Esc Exit",
         )
         viewport_overlay.tag_redraw()
@@ -159,14 +152,7 @@ class PMVR_OT_SceneDebugToggle(bpy.types.Operator):
         ):
             return self._finish(context)
 
-        direct_modes = {
-            'ONE': 'BAKE_STATUS',
-            'TWO': 'RENDER_LAYERS',
-            'THREE': 'UV_HEALTH',
-            'FOUR': 'TEXEL_DENSITY',
-            'FIVE': 'UV_CHECKER',
-        }
-        mode = direct_modes.get(event.type)
+        mode = DIRECT_MODE_KEYS.get(event.type)
         if mode and not (event.ctrl or event.shift or event.alt or event.oskey):
             _set_mode(context, mode)
             return {'RUNNING_MODAL'}
@@ -191,13 +177,7 @@ class PMVR_OT_SceneDebugSetMode(bpy.types.Operator):
     bl_options = {'INTERNAL'}
 
     mode: bpy.props.EnumProperty(
-        items=(
-            ('BAKE_STATUS', "Bake Status", "Show bake status"),
-            ('RENDER_LAYERS', "Render Layers", "Show render layers"),
-            ('UV_HEALTH', "UV Health", "Show UV health"),
-            ('TEXEL_DENSITY', "Texel Density", "Show SimpleBake texel density"),
-            ('UV_CHECKER', "Checker", "Preview the checker through the selected UV channel"),
-        ),
+        items=DEBUG_MODE_ITEMS,
     )
 
     @classmethod

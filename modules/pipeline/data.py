@@ -2,7 +2,14 @@
 
 import bpy
 
-from .constants import MODE_ITEMS, PROFILE_ITEMS, RESOLUTION_ITEMS, ROLE_ITEMS, STATE_ITEMS
+from .constants import (
+    DEBUG_OVERLAY_ITEMS,
+    LAYER_TYPE_ITEMS,
+    MODE_ITEMS,
+    RESOLUTION_ITEMS,
+    ROLE_ITEMS,
+    STATE_ITEMS,
+)
 
 
 _RESOLUTION_UPDATE_RUNNING = False
@@ -12,6 +19,19 @@ def _overlay_updated(_owner, _context):
     from . import viewport_overlay
 
     viewport_overlay.tag_redraw()
+
+
+def _layer_type_changed(layer, context):
+    scene = getattr(context, "scene", None)
+    project = getattr(scene, "pm_vr_project", None) if scene else None
+    if project and layer.layer_id:
+        for unit in project.bake_units:
+            if unit.render_layer_id != layer.layer_id:
+                continue
+            if unit.day_status == "Ready":
+                unit.day_status = "Layer type changed — rebake required"
+            if unit.evening_status == "Ready":
+                unit.evening_status = "Layer type changed — rebake required"
 
 
 def _active_layer_changed(project, _context):
@@ -32,20 +52,22 @@ def _active_layer_changed(project, _context):
 
 def _batch_resolution_changed(unit, context):
     global _RESOLUTION_UPDATE_RUNNING
-    if _RESOLUTION_UPDATE_RUNNING or not unit.batch_selected or not context.scene:
+    if _RESOLUTION_UPDATE_RUNNING or not context.scene:
         return
-    project = context.scene.pm_vr_project
-    _RESOLUTION_UPDATE_RUNNING = True
-    try:
-        for other in project.bake_units:
-            if (
-                other != unit
-                and other.batch_selected
-                and other.render_layer_id == unit.render_layer_id
-            ):
-                other.resolution = unit.resolution
-    finally:
-        _RESOLUTION_UPDATE_RUNNING = False
+    if unit.batch_selected:
+        project = context.scene.pm_vr_project
+        _RESOLUTION_UPDATE_RUNNING = True
+        try:
+            for other in project.bake_units:
+                if (
+                    other != unit
+                    and other.batch_selected
+                    and other.render_layer_id == unit.render_layer_id
+                ):
+                    other.resolution = unit.resolution
+        finally:
+            _RESOLUTION_UPDATE_RUNNING = False
+    _overlay_updated(unit, context)
 
 
 class PMVR_ObjectMetadata(bpy.types.PropertyGroup):
@@ -74,7 +96,13 @@ class PMVR_RenderLayer(bpy.types.PropertyGroup):
         update=_overlay_updated,
     )
     viewport_color_initialized: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
-    processing_profile: bpy.props.EnumProperty(name="Profile", items=PROFILE_ITEMS, default='BEAUTY_SCENE')
+    layer_type: bpy.props.EnumProperty(
+        name="Type",
+        description="Layer meaning and its Blender bake/export behavior",
+        items=LAYER_TYPE_ITEMS,
+        default='UNLIT',
+        update=_layer_type_changed,
+    )
     export_usdz: bpy.props.BoolProperty(name="USDZ", default=True)
     export_glb: bpy.props.BoolProperty(name="GLB", default=False)
 
@@ -154,15 +182,8 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     )
     overlay_mode: bpy.props.EnumProperty(
         name="Viewport Overlay",
-        description="Color source objects by bake status or semantic render layer",
-        items=(
-            ('OFF', "Off", "Disable the PM VR viewport overlay"),
-            ('BAKE_STATUS', "Bake Status", "Show missing, existing, and session bake results"),
-            ('RENDER_LAYERS', "Render Layers", "Color objects by semantic render layer"),
-            ('UV_HEALTH', "UV Health", "Show invalid and missing pipeline UV channels"),
-            ('TEXEL_DENSITY', "Texel Density", "Show SimpleBake texel density against the project target"),
-            ('UV_CHECKER', "Checker", "Preview the PM VR checker through a selected UV channel"),
-        ),
+        description="Visualize pipeline diagnostics directly in the 3D viewport",
+        items=DEBUG_OVERLAY_ITEMS,
         default='OFF',
         options={'SKIP_SAVE'},
         update=_overlay_updated,
@@ -199,6 +220,7 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         name="Default Unit Resolution",
         items=RESOLUTION_ITEMS,
         default='4096',
+        update=_overlay_updated,
     )
     beauty_output_directory: bpy.props.StringProperty(name="Beauty Directory", subtype='DIR_PATH', default="//Beauty_Bakes/")
     lightmap_output_directory: bpy.props.StringProperty(name="Lightmap Directory", subtype='DIR_PATH', default="//Lightmaps/")

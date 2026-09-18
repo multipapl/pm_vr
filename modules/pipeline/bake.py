@@ -25,9 +25,11 @@ from .constants import (
     TAG_MATERIAL_SLOT,
     TAG_MODE,
     TAG_SCHEMA,
+    TAG_LAYER_TYPE,
     TAG_SOURCE_ID,
     TAG_STATE,
     TAG_UNIT_ID,
+    UNLIT_LAYER_TYPES,
     WORK_COLLECTION,
 )
 from .identity import find_layer, find_unit, safe_stem, unit_members
@@ -275,7 +277,7 @@ def _set_target_image(receiver, image):
         node.id_data.nodes.active = node
 
 
-def _copy_receiver(context, source, work_collection, image, profile):
+def _copy_receiver(context, source, work_collection, image, receiver_type):
     source_uvs = source.data.uv_layers
     primary_source_uv = source_uvs.get(PRIMARY_UV_NAME)
     if not primary_source_uv:
@@ -305,9 +307,9 @@ def _copy_receiver(context, source, work_collection, image, profile):
     for index, source_material in enumerate(evaluated_materials):
         material = source_material.copy() if source_material else _make_fallback_material(f"__PMVR_WORK_MAT_{uuid.uuid4().hex}")
         material.name = f"__PMVR_WORK_MAT_{uuid.uuid4().hex}"
-        if profile == 'LIGHTMAP':
+        if receiver_type == 'LIGHTMAP':
             _wrap_surface_for_bake(material)
-        if profile == 'BEAUTY_PBR':
+        if receiver_type == 'PBR':
             for principled in _principled_nodes(material):
                 metallic = principled.inputs.get("Metallic")
                 if metallic:
@@ -412,9 +414,9 @@ def _bake_receivers(
         config.restore()
 
 
-def _signature_for_receivers(receivers, processing_profile=""):
+def _signature_for_receivers(receivers, layer_type=""):
     digest = hashlib.sha256()
-    digest.update(processing_profile.encode())
+    digest.update(layer_type.encode())
     for receiver in sorted(receivers, key=lambda item: item["source"].pm_vr_pipeline.source_id):
         source = receiver["source"]
         mesh = receiver["mesh"]
@@ -484,33 +486,39 @@ def _prune_unreachable_material_nodes(material):
             tree.nodes.remove(node)
 
 
-def _tag_material(material, unit, source_id, layer_id, state, slot, mode='BEAUTY'):
+def _tag_material(material, unit, source_id, layer, state, slot, mode='BEAUTY'):
     material[TAG_GENERATED] = True
     material[TAG_UNIT_ID] = unit.unit_id
     material[TAG_SOURCE_ID] = source_id
-    material[TAG_LAYER_ID] = layer_id
+    material[TAG_LAYER_ID] = layer.layer_id
+    material[TAG_LAYER_TYPE] = layer.layer_type
     material[TAG_MODE] = mode
     material[TAG_STATE] = state
     material[TAG_MATERIAL_SLOT] = slot
     material[TAG_SCHEMA] = SCHEMA_VERSION
 
 
-def _tag_image(image, unit, layer_id, state, mode):
+def _tag_image(image, unit, layer, state, mode):
     image[TAG_GENERATED] = True
     image[TAG_UNIT_ID] = unit.unit_id
-    image[TAG_LAYER_ID] = layer_id
+    image[TAG_LAYER_ID] = layer.layer_id
+    image[TAG_LAYER_TYPE] = layer.layer_type
     image[TAG_MODE] = mode
     image[TAG_STATE] = state
     image[TAG_SCHEMA] = SCHEMA_VERSION
 
 
-def _scene_material(unit, source, layer, state, image):
-    material = bpy.data.materials.new(f"PMVR_{safe_stem(unit.display_name)}_{state}_{source.pm_vr_pipeline.source_id[:8]}")
+def _scene_material(unit, layer, state, image):
+    material = bpy.data.materials.new(
+        f"PMVR_{safe_stem(unit.display_name)}_{state}_{unit.unit_id[:8]}"
+    )
     material.use_nodes = True
     principled = _principled_nodes(material)[0]
     principled.inputs["Metallic"].default_value = 0.0
     _new_uv_and_image_nodes(material, image, principled)
-    _tag_material(material, unit, source.pm_vr_pipeline.source_id, layer.layer_id, state, 0)
+    # Unlit and Translucent members share one atlas and one unit material for the
+    # whole bake unit, including units containing several source objects.
+    _tag_material(material, unit, "", layer, state, 0)
     return [material]
 
 
@@ -527,7 +535,7 @@ def _copied_materials(unit, source, layer, state, image):
             principled = _principled_nodes(material)
             if len(principled) != 1:
                 raise PipelineBakeError(f'{source.name}: material slot {slot} must resolve to exactly one Principled BSDF')
-            if layer.processing_profile == 'BEAUTY_TRANSLUCENT':
+            if layer.layer_type == 'ALPHA':
                 alpha = principled[0].inputs.get("Alpha")
                 if not alpha or (not alpha.is_linked and alpha.default_value >= 1.0):
                     raise PipelineBakeError(f'{source.name}: translucent material slot {slot} has no Alpha branch/value')
@@ -537,13 +545,13 @@ def _copied_materials(unit, source, layer, state, image):
                         for link in list(socket.links):
                             material.node_tree.links.remove(link)
             _new_uv_and_image_nodes(material, image, principled[0])
-            if layer.processing_profile == 'BEAUTY_TRANSLUCENT':
+            if layer.layer_type == 'ALPHA':
                 _prune_unreachable_material_nodes(material)
                 try:
                     material.surface_render_method = 'DITHERED'
                 except (AttributeError, TypeError, ValueError):
                     pass
-            _tag_material(material, unit, source.pm_vr_pipeline.source_id, layer.layer_id, state, slot)
+            _tag_material(material, unit, source.pm_vr_pipeline.source_id, layer, state, slot)
         return results
     except Exception:
         for material in results:
@@ -561,6 +569,15 @@ def _state_materials(unit_id, source_id, state, mode='BEAUTY'):
         and material.get(TAG_MODE) == mode
         and material.get(TAG_STATE) == state
     ]
+    if not materials and mode == 'BEAUTY':
+        materials = [
+            material for material in bpy.data.materials
+            if material.get(TAG_GENERATED)
+            and material.get(TAG_UNIT_ID) == unit_id
+            and not material.get(TAG_SOURCE_ID)
+            and material.get(TAG_MODE) == mode
+            and material.get(TAG_STATE) == state
+        ]
     return sorted(materials, key=lambda item: int(item.get(TAG_MATERIAL_SLOT, 0)))
 
 
@@ -611,6 +628,7 @@ def _commit_generated_geometry(context, unit, layer, receivers, signature, mode=
         generated[TAG_SOURCE_ID] = source_id
         generated[TAG_UNIT_ID] = unit.unit_id
         generated[TAG_LAYER_ID] = layer.layer_id
+        generated[TAG_LAYER_TYPE] = layer.layer_type
         generated[TAG_MODE] = mode
         generated[TAG_SCHEMA] = SCHEMA_VERSION
         generated.hide_render = False
@@ -652,13 +670,16 @@ def _prepare_materials(unit, layer, members, state, image):
     created = []
     staged = {}
     try:
-        for source in members:
-            if layer.processing_profile == 'BEAUTY_SCENE':
-                materials = _scene_material(unit, source, layer, state, image)
-            else:
-                materials = _copied_materials(unit, source, layer, state, image)
+        if layer.layer_type in UNLIT_LAYER_TYPES:
+            materials = _scene_material(unit, layer, state, image)
             created.extend(materials)
-            staged[source.pm_vr_pipeline.source_id] = materials
+            for source in members:
+                staged[source.pm_vr_pipeline.source_id] = materials
+        else:
+            for source in members:
+                materials = _copied_materials(unit, source, layer, state, image)
+                created.extend(materials)
+                staged[source.pm_vr_pipeline.source_id] = materials
         return staged, created
     except Exception:
         for material in created:
@@ -671,7 +692,7 @@ def _commit_materials(unit, layer, members, state, staged, created, mode='BEAUTY
     try:
         collapse_to_one = (
             mode == 'BEAUTY'
-            and layer.processing_profile == 'BEAUTY_SCENE'
+            and layer.layer_type in UNLIT_LAYER_TYPES
         )
         for source in members:
             generated = _find_generated(unit.unit_id, source.pm_vr_pipeline.source_id, mode)
@@ -707,10 +728,13 @@ def _commit_materials(unit, layer, members, state, staged, created, mode='BEAUTY
             if collapse_to_one:
                 for polygon in generated.data.polygons:
                     polygon.material_index = 0
+        unique_old = {}
         for materials in old_materials.values():
             for material in materials:
-                if material not in created and material.users == 0:
-                    bpy.data.materials.remove(material)
+                unique_old.setdefault(material.as_pointer(), material)
+        for material in unique_old.values():
+            if material not in created and material.users == 0:
+                bpy.data.materials.remove(material)
         return created
     except Exception:
         for material in created:
@@ -737,7 +761,7 @@ def _prepare_lightmap_materials(unit, layer, members, state, image):
                     material,
                     unit,
                     source.pm_vr_pipeline.source_id,
-                    layer.layer_id,
+                    layer,
                     state,
                     slot,
                     mode='LIGHTMAP',
@@ -919,7 +943,7 @@ class BeautyBakeRuntime:
         _tag_image(
             self.image,
             self.unit,
-            self.layer.layer_id,
+            self.layer,
             self.state,
             'BEAUTY',
         )
@@ -930,12 +954,12 @@ class BeautyBakeRuntime:
                     source,
                     self.work_collection,
                     self.image,
-                    self.layer.processing_profile,
+                    self.layer.layer_type,
                 )
             )
         self.signature = _signature_for_receivers(
             self.receivers,
-            self.layer.processing_profile,
+            self.layer.layer_type,
         )
         all_passes = {
             'DIRECT', 'INDIRECT', 'COLOR', 'DIFFUSE',
@@ -1186,7 +1210,7 @@ def bake_lightmap_unit(context, unit, operator=None):
             f"PMVR_Lightmap_{unit.artifact_key[:8]}_{state}_{uuid.uuid4().hex[:8]}",
             resolution,
         )
-        _tag_image(raw, unit, layer.layer_id, state, 'LIGHTMAP')
+        _tag_image(raw, unit, layer, state, 'LIGHTMAP')
         albedo = create_float_image(
             f"__PMVR_LM_ALBEDO_{uuid.uuid4().hex}", resolution, (1.0, 1.0, 1.0, 1.0)
         )

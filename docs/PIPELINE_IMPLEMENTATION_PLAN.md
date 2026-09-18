@@ -5,6 +5,12 @@
 **Scope:** Blender-side authoring, setup, bake orchestration, generated artifacts and USDZ/GLB export
 **Out of scope:** changes to the macOS Asset Manager and UP_AVP runtime, except where their existing contracts constrain Blender output
 
+> Current taxonomy amendment: one authoritative `layer_type` defines both
+> runtime meaning and Blender behavior. Its values are Unlit, PBR, Alpha,
+> Translucent, Glass, Emissive, Video, and Runtime. There is no parallel
+> processing-profile entity. Later sections using the former
+> Scene/Reflect/Translusent/Curtains terminology are legacy examples.
+
 ---
 
 ## 1. Product objective
@@ -330,9 +336,9 @@ PMVRProjectSettings
 ```text
 PMVRRenderLayer
   layer_id                 immutable UUID
-  display_name             e.g. LO_Scene; also the export filename stem
+  display_name             e.g. LO_Unlit; also the export filename stem
   enabled
-  processing_profile
+  layer_type
   export_usdz
   export_glb
 ```
@@ -340,44 +346,44 @@ PMVRRenderLayer
 The Day filename is the base output name:
 
 ```text
-LO_Scene.usdz
+LO_Unlit.usdz
 ```
 
 Evening automatically adds the fixed suffix:
 
 ```text
-LO_Scene_Evening.usdz
+LO_Unlit_Evening.usdz
 ```
 
 Do not store a second manually editable Evening filename.
 
 Prefixes such as `LO_` and `TR_` are ordinary parts of the layer/output name. They do not introduce another pipeline hierarchy.
 
-`LO_Scene` and `TR_Scene` are different render layers with the same processing profile.
+`LO_Unlit` and `TR_Unlit` are different render layers with the same layer type.
 
-### 6.3. Processing profiles
+### 6.3. Layer types
 
 Initial closed enum:
 
 ```text
-BEAUTY_SCENE
-BEAUTY_PBR
-BEAUTY_TRANSLUCENT
-EXPORT_ORIGINAL
+UNLIT
+PBR
+ALPHA
+TRANSLUCENT
+GLASS
+EMISSIVE
+VIDEO
+RUNTIME
 ```
 
-Suggested UI labels:
+Behavior is derived directly from this single value:
 
-```text
-Scene / Beauty
-PBR / Beauty
-Translucent / Beauty
-Export Original
-```
+- Unlit and Translucent use the simple unlit Beauty processor.
+- PBR bakes Base Color and preserves PBR channels.
+- Alpha bakes Base Color and preserves Alpha.
+- Glass, Emissive, Video, and Runtime export original source data.
 
-Curtains and Homepod use `Scene / Beauty` on the Blender side even though they remain distinct render layers for runtime processing.
-
-Do not infer the profile from the portion of the layer name after `_`. The UI may suggest a profile when creating a layer, but the saved enum is authoritative.
+Do not infer the type from the portion of the layer name after `_`. The saved enum is authoritative.
 
 ### 6.4. Source-object metadata
 
@@ -1067,7 +1073,7 @@ fix_operator   optional explicit safe action
 - empty or duplicate output base name;
 - invalid filesystem characters;
 - missing/duplicate layer UUID;
-- unsupported processing profile;
+- unsupported layer type;
 - layer has no members, reported as warning unless required;
 - member points to missing layer;
 - generated object registered as a source;
@@ -1611,7 +1617,7 @@ Do not include in the first production implementation unless a blocking need app
 - automatic artistic grouping into units;
 - automatic `Bake Changed` claims based on a full source fingerprint;
 - object-level Day/Evening overrides;
-- arbitrary user-defined processing profiles;
+- arbitrary user-defined layer types;
 - forced cancellation inside an unsafe blocking Cycles operation;
 - permanent mesh joining as part of bake;
 - automatic removal of source UV maps;

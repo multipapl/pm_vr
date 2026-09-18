@@ -8,11 +8,18 @@ from bpy.app.handlers import persistent
 
 from ..selection_targets import get_selected_target_objects
 from . import viewport_notice
+from .scene_diagnostics import (
+    BAKE_UV_NAME as SIMPLE_BAKE_UV_NAME,
+    PRIMARY_UV_NAME,
+    TARGET_TD_PX_PER_CM,
+    get_target_td,
+    has_applied_scale,
+    has_pipeline_uvs,
+    measure_texel_areas,
+)
 
 UI_CATEGORY = "OPTIMIZATION"
 
-PRIMARY_UV_NAME = "UVMap"
-SIMPLE_BAKE_UV_NAME = "SimpleBake"
 EXTERNAL_TEXTURE_FOLDER_NAME = "PM_Selected_Textures"
 TEXTURE_FILE_EXTENSIONS = (
     ".jpg",
@@ -37,6 +44,7 @@ AUDIT_ISSUE_BITS = {
     "material_name_mismatch": 1 << 4,
     "shared_materials": 1 << 5,
     "uv_channels": 1 << 6,
+    "unapplied_scale": 1 << 7,
 }
 
 
@@ -483,38 +491,36 @@ def ensure_uv_channels_for_objects(objects):
 
 
 def has_valid_uv_channels(mesh):
-    layers = mesh.uv_layers if mesh else ()
-    return bool(
-        len(layers) >= 2
-        and layers[0].name == PRIMARY_UV_NAME
-        and layers[1].name == SIMPLE_BAKE_UV_NAME
-    )
+    """Compatibility name for the shared pipeline UV predicate."""
+    return has_pipeline_uvs(mesh)
 
 
 def objects_with_invalid_uv_channels(objects):
     return [obj for obj in objects if not has_valid_uv_channels(obj.data)]
 
 
-def audit_issue_keys(obj):
+def naming_issue_keys(obj):
     issues = []
     if not is_pascal_case_name(obj.name) or BLENDER_DUPLICATE_SUFFIX_PATTERN.match(obj.name):
         issues.append("bad_object_names")
-    if obj.data and obj.data.users > 1:
-        issues.append("shared_mesh_data")
     if obj.data and obj.data.name != obj.name:
         issues.append("mesh_name_mismatch")
-
     materials = get_non_empty_materials(obj)
-    if len(materials) != 1 or any(slot.material is None for slot in obj.material_slots):
-        issues.append("material_count")
-    else:
+    if len(materials) == 1:
         material = materials[0]
         if material.name != obj.name:
             issues.append("material_name_mismatch")
-        if count_material_object_users(material) > 1:
-            issues.append("shared_materials")
+    return issues
+
+
+def audit_issue_keys(obj):
+    issues = []
+    if obj.data and obj.data.users > 1:
+        issues.append("shared_mesh_data")
     if obj.data and not has_valid_uv_channels(obj.data):
         issues.append("uv_channels")
+    if not has_applied_scale(obj):
+        issues.append("unapplied_scale")
     return issues
 
 
@@ -552,6 +558,9 @@ def audit_issue_details(obj, flags):
         if len(names) > 3:
             current += ", ..."
         details.append(f'UV channels are [{current}]; expected UVMap, SimpleBake')
+    if flags & AUDIT_ISSUE_BITS["unapplied_scale"]:
+        values = ", ".join(f"{value:.3g}" for value in obj.scale)
+        details.append(f"Scale is [{values}]; expected 1, 1, 1")
     return details
 
 
@@ -564,6 +573,7 @@ def audit_objects(objects):
         "material_name_mismatch": [],
         "shared_materials": [],
         "uv_channels": [],
+        "unapplied_scale": [],
     }
 
     for obj in objects:
@@ -632,22 +642,14 @@ def _store_audit_results(scene, objects, scope_label):
 
 
 def _audit_group_counts(scene):
-    naming_bits = (
-        AUDIT_ISSUE_BITS["bad_object_names"]
-        | AUDIT_ISSUE_BITS["mesh_name_mismatch"]
-        | AUDIT_ISSUE_BITS["material_name_mismatch"]
-    )
-    data_bits = (
-        AUDIT_ISSUE_BITS["shared_mesh_data"]
-        | AUDIT_ISSUE_BITS["material_count"]
-        | AUDIT_ISSUE_BITS["shared_materials"]
-    )
+    data_bits = AUDIT_ISSUE_BITS["shared_mesh_data"]
     uv_bit = AUDIT_ISSUE_BITS["uv_channels"]
-    counts = {"Naming": 0, "Materials / Data": 0, "UV Channels": 0}
+    scale_bit = AUDIT_ISSUE_BITS["unapplied_scale"]
+    counts = {"Data": 0, "UV Channels": 0, "Scale": 0}
     for item in scene.pm_vr_audit_results:
-        counts["Naming"] += audit_issue_count(item.issue_flags & naming_bits)
-        counts["Materials / Data"] += audit_issue_count(item.issue_flags & data_bits)
+        counts["Data"] += audit_issue_count(item.issue_flags & data_bits)
         counts["UV Channels"] += audit_issue_count(item.issue_flags & uv_bit)
+        counts["Scale"] += audit_issue_count(item.issue_flags & scale_bit)
     return counts
 
 
@@ -727,7 +729,7 @@ def format_issue_sample(names):
 class PM_OT_VR_AuditObjectPrep(bpy.types.Operator):
     bl_idname = "pm_vr.audit_object_prep"
     bl_label = "Audit Object Prep"
-    bl_description = "Check the current object naming, material, and UV preparation rules"
+    bl_description = "Check shared mesh data, UV channels, and unapplied scale"
     bl_options = {'REGISTER'}
 
     scope: bpy.props.EnumProperty(  # type: ignore[reportInvalidTypeForm]
@@ -894,6 +896,32 @@ class PM_OT_VR_AuditClear(bpy.types.Operator):
         scene.pm_vr_audit_checked_count = 0
         scene.pm_vr_audit_issue_count = 0
         scene.pm_vr_audit_scope_label = ""
+        return {'FINISHED'}
+
+
+class PM_OT_VR_CheckNames(bpy.types.Operator):
+    bl_idname = "pm_vr.check_names"
+    bl_label = "Check Names"
+    bl_description = "Select objects that do not follow the legacy customer naming rules"
+    bl_options = {'REGISTER'}
+
+    scope: bpy.props.EnumProperty(
+        name="Scope",
+        items=(
+            ('SELECTED', "Selected", "Only selected mesh targets"),
+            ('ALL', "Scene", "All source mesh objects in the current scene"),
+        ),
+        default='ALL',
+    )
+
+    def execute(self, context):
+        objects = iter_scope_objects(context, self.scope)
+        problems = [obj for obj in objects if naming_issue_keys(obj)]
+        selected, hidden = select_scene_objects(context, problems)
+        message = f"Name check: {len(problems)} problem object(s)"
+        if hidden:
+            message += f", {hidden} outside the active View Layer"
+        self.report({'WARNING'} if problems else {'INFO'}, message)
         return {'FINISHED'}
 
 
@@ -1268,14 +1296,12 @@ class PM_OT_VR_ExternalizeSelectedTextures(bpy.types.Operator):
         return {'FINISHED'}
 
 
-TARGET_TD_PX_PER_CM = 5.0
 _TD_DEFAULT_VERSION_KEY = "pm_vr_target_td_default_version"
 TEXTURE_OPTIONS = {
     "1K": 1024,
     "2K": 2048,
     "4K": 4096,
 }
-CM_PER_BLEND_UNIT = 100.0
 
 TD_LABEL_TEXT_VARIANTS = (
     "_1K",
@@ -1308,75 +1334,15 @@ def build_td_name(base_name, suffix, use_prefix):
     return f"{base_name}_{suffix}"
 
 
-def polygon_area_2d(points):
-    if len(points) < 3:
-        return 0.0
-    area = 0.0
-    for i in range(len(points)):
-        x1, y1 = points[i]
-        x2, y2 = points[(i + 1) % len(points)]
-        area += x1 * y2 - x2 * y1
-    return abs(area) * 0.5
-
-
-def triangle_area_3d(a, b, c):
-    return ((b - a).cross(c - a)).length * 0.5
-
-
 def get_mesh_areas(obj):
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    obj_eval = obj.evaluated_get(depsgraph)
-    mesh = obj_eval.to_mesh()
-
-    try:
-        if not mesh.polygons:
-            return 0.0, 0.0, "no polygons"
-
-        uv_layer = mesh.uv_layers.get(SIMPLE_BAKE_UV_NAME)
-        if uv_layer is None:
-            return 0.0, 0.0, f'UV channel "{SIMPLE_BAKE_UV_NAME}" not found'
-
-        world_area_bu2 = 0.0
-        uv_area = 0.0
-        mw = obj_eval.matrix_world
-
-        for poly in mesh.polygons:
-            loop_indices = poly.loop_indices
-            if len(loop_indices) < 3:
-                continue
-
-            verts_world = [
-                mw @ mesh.vertices[mesh.loops[i].vertex_index].co
-                for i in loop_indices
-            ]
-            v0 = verts_world[0]
-            for i in range(1, len(verts_world) - 1):
-                world_area_bu2 += triangle_area_3d(
-                    v0, verts_world[i], verts_world[i + 1]
-                )
-
-            uvs = [uv_layer.data[i].uv.copy() for i in loop_indices]
-            uv_area += polygon_area_2d(uvs)
-
-        scene_scale = max(
-            1.0e-9,
-            float(bpy.context.scene.unit_settings.scale_length),
-        )
-        cm_per_blend_unit = CM_PER_BLEND_UNIT * scene_scale
-        mesh_area_cm2 = world_area_bu2 * (cm_per_blend_unit ** 2)
-        return mesh_area_cm2, uv_area, None
-    finally:
-        obj_eval.to_mesh_clear()
+    """Compatibility wrapper around the canonical pipeline measurement."""
+    return measure_texel_areas(bpy.context, obj)
 
 
 # LEGACY TEXEL-LABEL WORKFLOW
 # Hidden from the Optimize UI since bake-unit resolution superseded object-name
 # 1K/2K/4K labels. Keep the helpers, operators, and Scene properties registered
 # for old files, scripts, and emergency manual use. See docs/LEGACY.md.
-def get_target_td(context):
-    return getattr(context.scene, "pm_vr_target_td", TARGET_TD_PX_PER_CM)
-
-
 def _migrate_target_td_defaults():
     scenes = getattr(bpy.data, "scenes", ())
     for scene in scenes:
@@ -1668,7 +1634,10 @@ def draw_ui(layout, context):
     box.separator()
 
     name_col = box.column(align=True)
-    op = name_col.operator(PM_OT_VR_SyncNamesFromObjects.bl_idname, text="Sync Names", icon='OUTLINER_OB_MESH')
+    row = name_col.row(align=True)
+    op = row.operator(PM_OT_VR_CheckNames.bl_idname, text="Check Names", icon='VIEWZOOM')
+    op.scope = 'SELECTED'
+    op = row.operator(PM_OT_VR_SyncNamesFromObjects.bl_idname, text="Sync Names", icon='OUTLINER_OB_MESH')
     op.scope = 'SELECTED'
 
     box.separator()
@@ -1716,6 +1685,7 @@ classes = (
     PM_OT_VR_AuditSelectAll,
     PM_OT_VR_AuditRecheckActive,
     PM_OT_VR_AuditClear,
+    PM_OT_VR_CheckNames,
     PM_OT_VR_SyncNamesFromObjects,
     PM_OT_VR_CheckUVChannels,
     PM_OT_VR_FixUVChannels,

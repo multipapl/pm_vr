@@ -26,7 +26,7 @@ class PMVR_UL_RenderLayers(bpy.types.UIList):
         row.prop(item, "viewport_color", text="")
         row.prop(item, "enabled", text="")
         row.prop(item, "display_name", text="", emboss=False, icon='RENDERLAYERS')
-        row.label(text=item.bl_rna.properties["processing_profile"].enum_items[item.processing_profile].name)
+        row.label(text=item.bl_rna.properties["layer_type"].enum_items[item.layer_type].name)
 
 
 class PMVR_UL_BakeUnits(bpy.types.UIList):
@@ -77,7 +77,7 @@ def draw_setup(layout, context):
     if layer:
         detail = layers.column(align=True)
         detail.prop(layer, "display_name")
-        detail.prop(layer, "processing_profile")
+        detail.prop(layer, "layer_type")
         formats = detail.row(align=True)
         formats.prop(layer, "export_usdz", toggle=True)
         formats.prop(layer, "export_glb", toggle=True)

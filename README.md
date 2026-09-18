@@ -41,12 +41,18 @@ mesh geometry, materials, UV coordinates, modifiers, and collection membership a
 The first UV channel is activated for baking as a safety measure; authored UV data is unchanged.
 Generated objects remain separate and are owned through stable IDs rather than names.
 
-The processors are:
+Every semantic layer has one authoritative type: `Unlit`, `PBR`, `Alpha`,
+`Translucent`, `Glass`, `Emissive`, `Video`, or `Runtime`. The type directly
+defines both its runtime meaning and Blender behavior:
 
-- `Scene / Beauty`: baked Base Color on `SimpleBake` in a simple Principled material;
-- `PBR / Beauty`: baked Base Color plus original Metallic/Roughness/Normal on `UVMap`;
-- `Translucent / Beauty`: baked Base Color plus original Alpha on `UVMap`;
-- `Export Original`: no generated copy.
+- `Unlit` and `Translucent`: baked Base Color on `SimpleBake` in a simple Principled material;
+- `PBR`: baked Base Color plus original Metallic/Roughness/Normal on `UVMap`;
+- `Alpha`: baked Base Color plus original Alpha on `UVMap`;
+- `Glass`, `Emissive`, `Video`, and `Runtime`: export original source data.
+
+`Runtime` contains non-rendered application data such as probe cameras,
+empties, navigation, and collision geometry. Cameras are included in USDZ/GLB
+export; conversion to empties can be added later if needed.
 
 Day uses the base output filename; Evening adds `_Evening`. Export is blocked when
 the current state has no compatible Beauty artifact.

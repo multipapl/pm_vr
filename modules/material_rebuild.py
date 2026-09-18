@@ -2,12 +2,15 @@
 
 import bpy
 
+from .scene_diagnostics import (
+    BAKE_UV_NAME as BAKED_UV_NAME,
+    PRIMARY_UV_NAME,
+)
+
 
 UI_CATEGORY = "LEGACY_MATERIAL_REBUILD"
 BAKED_SUFFIX = "_Baked"
 OUTPUT_SUFFIX = "_M"
-PRIMARY_UV_NAME = "UVMap"
-BAKED_UV_NAME = "SimpleBake"
 TAG_GENERATED = "pm_vr_material_rebuild_generated"
 TAG_SOURCE = "pm_vr_material_rebuild_source"
 NODE_PRIMARY_UV = "PM VR UVMap"

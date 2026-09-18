@@ -1,9 +1,10 @@
 """Shared constants for PM Lightmap Baker."""
 
+from ..scene_diagnostics import BAKE_UV_NAME
+
 UI_CATEGORY = "LEGACY_LIGHTMAP"
 
 BAKER_VERSION = 1
-BAKE_UV_NAME = "SimpleBake"
 OUTPUT_COLLECTION_NAME = "PM_Lightmap_Bakes"
 RESULT_SUFFIX = "_LM"
 
