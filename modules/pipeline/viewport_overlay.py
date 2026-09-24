@@ -927,9 +927,23 @@ def _draw_pixel():
         gpu.state.blend_set('NONE')
 
 
+def _subscribe_uv_edits():
+    mesh_uv_loop = getattr(bpy.types, "MeshUVLoop", None)
+    if mesh_uv_loop is not None:
+        bpy.msgbus.clear_by_owner(_uv_message_owner)
+        bpy.msgbus.subscribe_rna(
+            key=(mesh_uv_loop, "uv"),
+            owner=_uv_message_owner,
+            args=(),
+            notify=invalidate_texel_cache,
+        )
+
+
 @persistent
 def _load_post(_filepath):
     global _checker_texture_instance
+    # Loading a file drops message-bus subscriptions.
+    _subscribe_uv_edits()
     _surface_batch_cache.clear()
     _checker_batch_cache.clear()
     _texel_area_cache.clear()
@@ -988,15 +1002,7 @@ def register():
         bpy.app.handlers.load_post.append(_load_post)
     if _depsgraph_update not in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.append(_depsgraph_update)
-    mesh_uv_loop = getattr(bpy.types, "MeshUVLoop", None)
-    if mesh_uv_loop is not None:
-        bpy.msgbus.clear_by_owner(_uv_message_owner)
-        bpy.msgbus.subscribe_rna(
-            key=(mesh_uv_loop, "uv"),
-            owner=_uv_message_owner,
-            args=(),
-            notify=invalidate_texel_cache,
-        )
+    _subscribe_uv_edits()
     scenes = getattr(bpy.data, "scenes", None)
     if scenes is not None:
         for scene in scenes:

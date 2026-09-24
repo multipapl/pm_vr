@@ -18,8 +18,10 @@ from .constants import (
     TAG_UNIT_ID,
 )
 from .identity import (
+    duplicate_source_ids,
     ensure_project_id,
     ensure_source_id,
+    extra_export_members,
     find_layer,
     find_unit,
     layer_members,
@@ -86,6 +88,49 @@ def active_unit(project):
     return None
 
 
+def _remove_extra_export_layer(metadata, layer_id):
+    removed = 0
+    for index in reversed(range(len(metadata.extra_export_layers))):
+        if metadata.extra_export_layers[index].layer_id == layer_id:
+            metadata.extra_export_layers.remove(index)
+            removed += 1
+    return removed
+
+
+def selected_source_objects(context):
+    """Accept source or generated selections for export-only membership edits."""
+    sources_by_id = {
+        obj.pm_vr_pipeline.source_id: obj
+        for obj in bpy.data.objects
+        if hasattr(obj, "pm_vr_pipeline")
+        and obj.pm_vr_pipeline.is_registered_source
+        and obj.pm_vr_pipeline.source_id
+    }
+    sources = []
+    seen = set()
+    for selected in context.selected_objects:
+        source = (
+            sources_by_id.get(selected.get(TAG_SOURCE_ID, ""))
+            if selected.get(TAG_GENERATED)
+            else selected
+        )
+        if (
+            source
+            and hasattr(source, "pm_vr_pipeline")
+            and source.pm_vr_pipeline.is_registered_source
+            and source.as_pointer() not in seen
+        ):
+            sources.append(source)
+            seen.add(source.as_pointer())
+    return sources
+
+
+def structure_editable(context):
+    """Block collection reallocation while a modal bake holds unit/layer items."""
+    project = getattr(context.scene, "pm_vr_project", None) if context.scene else None
+    return bool(project and not project.operation_running)
+
+
 def add_layer(project, name="Unlit", layer_type='UNLIT'):
     layer = project.render_layers.add()
     layer.layer_id = new_id()
@@ -105,6 +150,10 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
     bl_label = "Initialize Pipeline Project"
     bl_description = "Create stable project identity and an initial semantic layer set"
     bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return structure_editable(context)
 
     def execute(self, context):
         project = context.scene.pm_vr_project
@@ -131,6 +180,10 @@ class PMVR_OT_AddRenderLayer(bpy.types.Operator):
     bl_label = "Add Render Layer"
     bl_options = {'REGISTER', 'UNDO'}
 
+    @classmethod
+    def poll(cls, context):
+        return structure_editable(context)
+
     def execute(self, context):
         project = context.scene.pm_vr_project
         ensure_project_id(project)
@@ -146,7 +199,7 @@ class PMVR_OT_RemoveRenderLayer(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(context.scene.pm_vr_project.render_layers)
+        return bool(context.scene.pm_vr_project.render_layers) and structure_editable(context)
 
     def execute(self, context):
         project = context.scene.pm_vr_project
@@ -156,6 +209,9 @@ class PMVR_OT_RemoveRenderLayer(bpy.types.Operator):
             return {'CANCELLED'}
         if any(unit.render_layer_id == layer.layer_id for unit in project.bake_units):
             self.report({'ERROR'}, "Remove this layer's bake units first")
+            return {'CANCELLED'}
+        if extra_export_members(layer.layer_id):
+            self.report({'ERROR'}, "Remove additional export assignments before removing this layer")
             return {'CANCELLED'}
         index = project.active_render_layer_index
         project.render_layers.remove(index)
@@ -186,6 +242,7 @@ class PMVR_OT_AssignSelectedToLayer(bpy.types.Operator):
             metadata = obj.pm_vr_pipeline
             ensure_source_id(obj)
             metadata.render_layer_id = layer.layer_id
+            _remove_extra_export_layer(metadata, layer.layer_id)
             metadata.processing_role = 'EXPORT_ORIGINAL' if obj.type == 'EMPTY' else role
             if metadata.processing_role != 'BAKE':
                 metadata.bake_unit_id = ""
@@ -201,6 +258,7 @@ class PMVR_OT_UnassignSelected(bpy.types.Operator):
 
     def execute(self, context):
         count = 0
+        cleared_exports = 0
         for obj in context.selected_objects:
             if not hasattr(obj, "pm_vr_pipeline"):
                 continue
@@ -208,8 +266,82 @@ class PMVR_OT_UnassignSelected(bpy.types.Operator):
             meta.render_layer_id = ""
             meta.bake_unit_id = ""
             meta.processing_role = 'UNASSIGNED'
+            cleared_exports += len(meta.extra_export_layers)
+            meta.extra_export_layers.clear()
             count += 1
-        self.report({'INFO'}, f"Unassigned {count} object(s)")
+        suffix = f"; cleared {cleared_exports} additional export assignment(s)" if cleared_exports else ""
+        self.report({'INFO'}, f"Unassigned {count} object(s){suffix}")
+        return {'FINISHED'}
+
+
+class PMVR_OT_EditExtraExports(bpy.types.Operator):
+    bl_idname = "pmvr.edit_extra_exports"
+    bl_label = "Edit Additional Export Layers"
+    bl_description = "Include or remove selected sources in the active layer's export file without changing their bake layer"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action: bpy.props.EnumProperty(
+        items=(('ADD', "Include", ""), ('REMOVE', "Remove", "")),
+        default='ADD',
+    )
+    source_id: bpy.props.StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        project = getattr(context.scene, "pm_vr_project", None) if context.scene else None
+        return bool(project and project.render_layers)
+
+    def execute(self, context):
+        project = context.scene.pm_vr_project
+        target = active_layer(project)
+        sources = (
+            [
+                obj for obj in bpy.data.objects
+                if obj.pm_vr_pipeline.is_registered_source
+                and obj.pm_vr_pipeline.source_id == self.source_id
+            ]
+            if self.source_id
+            else selected_source_objects(context)
+        )
+        if not target or not sources:
+            self.report({'WARNING'}, "Select one or more registered source objects")
+            return {'CANCELLED'}
+        ambiguous_ids = set(duplicate_source_ids())
+        if any(source.pm_vr_pipeline.source_id in ambiguous_ids for source in sources):
+            self.report({'ERROR'}, "Selected source has a duplicate ID; repair it before editing exports")
+            return {'CANCELLED'}
+        changed = 0
+        skipped = {}
+        for source in sources:
+            metadata = source.pm_vr_pipeline
+            if self.action == 'REMOVE':
+                if _remove_extra_export_layer(metadata, target.layer_id):
+                    changed += 1
+                else:
+                    skipped["not assigned"] = skipped.get("not assigned", 0) + 1
+                continue
+            owner = find_layer(project, metadata.render_layer_id)
+            if not metadata.source_id:
+                reason = "missing source ID"
+            elif not owner or metadata.processing_role == 'UNASSIGNED':
+                reason = "no valid primary layer"
+            elif owner.layer_id == target.layer_id:
+                reason = "already primary"
+            elif owner.layer_type != target.layer_type:
+                reason = "different layer type"
+            elif any(entry.layer_id == target.layer_id for entry in metadata.extra_export_layers):
+                reason = "already included"
+            else:
+                reason = ""
+            if reason:
+                skipped[reason] = skipped.get(reason, 0) + 1
+                continue
+            metadata.extra_export_layers.add().layer_id = target.layer_id
+            changed += 1
+        verb = "Included" if self.action == 'ADD' else "Removed"
+        suffix = "; " + ", ".join(f"{count} {reason}" for reason, count in skipped.items()) if skipped else ""
+        preposition = "in" if self.action == 'ADD' else "from"
+        self.report({'INFO'}, f"{verb} {changed} source(s) {preposition} {target.display_name}{suffix}")
         return {'FINISHED'}
 
 
@@ -223,7 +355,7 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return bool(context.selected_objects and context.scene.pm_vr_project.render_layers)
+        return bool(context.selected_objects and context.scene.pm_vr_project.render_layers) and structure_editable(context)
 
     def invoke(self, context, event):
         self.merge_selected = event.shift
@@ -246,6 +378,7 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
                 already_assigned += 1
                 continue
             meta.render_layer_id = layer.layer_id
+            _remove_extra_export_layer(meta, layer.layer_id)
             meta.processing_role = 'BAKE'
             members.append(obj)
         if not members:
@@ -364,6 +497,9 @@ class PMVR_OT_AssignSelectedToUnit(bpy.types.Operator):
     def execute(self, context):
         project = context.scene.pm_vr_project
         unit = active_unit(project)
+        if not unit:
+            self.report({'ERROR'}, "The active render layer has no bake unit")
+            return {'CANCELLED'}
         count = 0
         for obj in context.selected_objects:
             if obj.type != 'MESH' or obj.get(TAG_GENERATED):
@@ -371,6 +507,7 @@ class PMVR_OT_AssignSelectedToUnit(bpy.types.Operator):
             ensure_source_id(obj)
             meta = obj.pm_vr_pipeline
             meta.render_layer_id = unit.render_layer_id
+            _remove_extra_export_layer(meta, unit.render_layer_id)
             meta.processing_role = 'BAKE'
             meta.bake_unit_id = unit.unit_id
             count += 1
@@ -385,7 +522,7 @@ class PMVR_OT_RemoveBakeUnit(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return active_unit(context.scene.pm_vr_project) is not None
+        return active_unit(context.scene.pm_vr_project) is not None and structure_editable(context)
 
     def execute(self, context):
         project = context.scene.pm_vr_project
@@ -394,18 +531,17 @@ class PMVR_OT_RemoveBakeUnit(bpy.types.Operator):
             obj for obj in bpy.data.objects
             if obj.get(TAG_GENERATED) and obj.get(TAG_UNIT_ID) == unit.unit_id
         ]
+        from .bake import release_generated_material, remove_generated_object
+
         for generated in generated_objects:
-            mesh = generated.data if generated.type == 'MESH' else None
-            bpy.data.objects.remove(generated, do_unlink=True)
-            if mesh and mesh.users == 0:
-                bpy.data.meshes.remove(mesh)
+            remove_generated_object(generated)
+
         for material in list(bpy.data.materials):
             if (
                 material.get(TAG_GENERATED)
                 and material.get(TAG_UNIT_ID) == unit.unit_id
-                and material.users == 0
             ):
-                bpy.data.materials.remove(material)
+                release_generated_material(material)
         for image in list(bpy.data.images):
             if (
                 image.get(TAG_GENERATED)
@@ -597,6 +733,7 @@ class PMVR_OT_RegisterDuplicateAsNew(bpy.types.Operator):
             if meta.is_registered_source:
                 meta.source_id = new_id()
                 meta.bake_unit_id = ""
+                meta.extra_export_layers.clear()
                 count += 1
         self.report({'INFO'}, f"Registered {count} selected object(s) as new sources")
         return {'FINISHED'}
@@ -607,6 +744,7 @@ class PMVR_OT_SelectPipelineItems(bpy.types.Operator):
     bl_label = "Select Pipeline Items"
     target: bpy.props.EnumProperty(items=(
         ('LAYER_SOURCES', "Layer Sources", ""),
+        ('LAYER_EXPORT_GUESTS', "Additional Export Objects", ""),
         ('UNIT_SOURCES', "Unit Sources", ""),
         ('UNIT_GENERATED', "Unit Generated", ""),
         ('UNASSIGNED', "Unassigned", ""),
@@ -621,6 +759,9 @@ class PMVR_OT_SelectPipelineItems(bpy.types.Operator):
         if self.target == 'LAYER_SOURCES':
             layer = active_layer(project)
             objects = layer_members(layer.layer_id) if layer else []
+        elif self.target == 'LAYER_EXPORT_GUESTS':
+            layer = active_layer(project)
+            objects = extra_export_members(layer.layer_id) if layer else []
         elif self.target == 'UNIT_SOURCES':
             unit = active_unit(project)
             objects = unit_members(unit.unit_id) if unit else []
@@ -710,6 +851,7 @@ CLASSES = (
     PMVR_OT_RemoveRenderLayer,
     PMVR_OT_AssignSelectedToLayer,
     PMVR_OT_UnassignSelected,
+    PMVR_OT_EditExtraExports,
     PMVR_OT_AddBakeUnit,
     PMVR_OT_ScaleQueuedResolution,
     PMVR_OT_SelectAllUnitsForResolution,

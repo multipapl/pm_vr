@@ -396,6 +396,7 @@ PMVRObjectMetadata
   processing_role
   bake_unit_id             required only for Bake role
   is_registered_source
+  extra_export_layers[]    optional additional output layer IDs
 ```
 
 Processing roles:
@@ -421,6 +422,11 @@ Rules:
 - Homepod screen geometry and UI empties use `Export Original`.
 - A layer with profile `Export Original` forces all its members to that role.
 - `UNASSIGNED` is a validation state, not a silent export behavior.
+- `render_layer_id` remains the sole bake-layer owner. Additional export layers
+  affect only output-file membership and never create another bake unit.
+- An object may have several additional export layers of the same layer type as
+  its primary layer. Assignments are saved on the source object, not on
+  generated Beauty objects.
 
 ### 6.5. Bake-unit definition
 
@@ -1180,6 +1186,11 @@ visible assigned source originals
 ```
 
 Objects hidden by the active authored lighting/state collection are not exported for that state.
+
+The export resolver also includes sources whose `extra_export_layers` contains
+the output layer ID. It reuses their current-state generated Beauty or original
+representation and includes each source at most once per file. No second bake
+or sidecar manifest is produced.
 
 Examples:
 

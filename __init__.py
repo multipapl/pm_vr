@@ -1,5 +1,13 @@
+if "bpy" in locals():
+    # Blender re-executes this file when scripts are reloaded. Drop every
+    # submodule so nested packages (pipeline, lightmap_baker) are imported
+    # fresh instead of keeping their previous code.
+    import sys
+
+    for _module_name in [name for name in sys.modules if name.startswith(f"{__name__}.")]:
+        del sys.modules[_module_name]
+
 import bpy
-import importlib
 
 from .modules import lightmap_baker
 from .modules import checker_preview
@@ -74,7 +82,6 @@ def register():
     bpy.types.Scene.pm_vr_ui_state = bpy.props.PointerProperty(type=PMVR_UI_State)
 
     for module in MODULES:
-        importlib.reload(module)
         module.register()
 
 

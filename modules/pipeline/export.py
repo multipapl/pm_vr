@@ -1,14 +1,20 @@
 """Semantic layer export assembled from generated and original representations."""
 
 import os
+import shutil
 import uuid
 
 import bpy
 
 from .. import collection_export
-from .bake import bind_generated_state
+from .bake import (
+    PipelineBakeError,
+    bind_generated_state,
+    restore_generated_bindings,
+    snapshot_generated_bindings,
+)
 from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
-from .identity import find_unit, layer_members, safe_stem
+from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem
 from .state import activate_state
 from .validation import object_render_visible
 
@@ -21,15 +27,24 @@ class PipelineExportCancelled(PipelineExportError):
     pass
 
 
-def _generated_for_source(source, unit_id):
-    source_id = source.pm_vr_pipeline.source_id
-    return next((
-        obj for obj in bpy.data.objects
-        if obj.get(TAG_GENERATED)
-        and obj.get(TAG_MODE) == 'BEAUTY'
-        and obj.get(TAG_UNIT_ID) == unit_id
-        and obj.get(TAG_SOURCE_ID) == source_id
-    ), None)
+def _generated_beauty_index():
+    index = {}
+    for obj in bpy.data.objects:
+        if obj.get(TAG_GENERATED) and obj.get(TAG_MODE) == 'BEAUTY':
+            key = (obj.get(TAG_UNIT_ID), obj.get(TAG_SOURCE_ID))
+            index.setdefault(key, []).append(obj)
+    return index
+
+
+def _generated_for_source(source, unit_id, index):
+    matches = index.get((unit_id, source.pm_vr_pipeline.source_id), [])
+    if len(matches) > 1:
+        names = ", ".join(obj.name for obj in matches)
+        raise PipelineExportError(
+            f'{source.name}: several generated Beauty objects claim this source '
+            f'({names}); delete the extra copies'
+        )
+    return matches[0] if matches else None
 
 
 def _unit_ready(unit, state):
@@ -49,8 +64,17 @@ def resolve_layer_objects(context, layer):
     resolved = []
     seen = set()
     bound_units = set()
-    for source in layer_members(layer.layer_id):
+    generated_index = _generated_beauty_index()
+    for source in export_layer_members(layer.layer_id):
         metadata = source.pm_vr_pipeline
+        if not metadata.source_id:
+            raise PipelineExportError(f'{source.name}: registered source has no ID')
+        if metadata.render_layer_id != layer.layer_id:
+            owner = find_layer(project, metadata.render_layer_id)
+            if not owner or owner.layer_type != layer.layer_type:
+                raise PipelineExportError(
+                    f'{source.name}: additional export to {layer.display_name} has an incompatible source layer'
+                )
         if metadata.processing_role == 'UNASSIGNED':
             raise PipelineExportError(f'{source.name}: role is Unassigned')
         if metadata.processing_role == 'EXPORT_ORIGINAL':
@@ -65,11 +89,14 @@ def resolve_layer_objects(context, layer):
         if not ready:
             raise PipelineExportError(message)
         if unit.unit_id not in bound_units:
-            bind_generated_state(unit, state)
+            try:
+                bind_generated_state(unit, state, strict=True)
+            except PipelineBakeError as exc:
+                raise PipelineExportError(f'{unit.display_name}: {exc}') from exc
             bound_units.add(unit.unit_id)
         if not object_render_visible(source, context.view_layer):
             continue
-        generated = _generated_for_source(source, unit.unit_id)
+        generated = _generated_for_source(source, unit.unit_id, generated_index)
         if not generated:
             raise PipelineExportError(f'{source.name}: generated Beauty object is missing')
         if generated.as_pointer() not in seen:
@@ -104,18 +131,30 @@ def _export_path(project, layer, state, format_name):
     return os.path.join(directory, f"{safe_stem(layer.display_name)}{suffix}{extension}")
 
 
+def _temporary_export_path(final_path):
+    # Export under the final filename inside a private folder: USDZ stores the
+    # file stem as its root layer name, so a renamed temporary file would leak
+    # into the published package.
+    directory, filename = os.path.split(final_path)
+    folder = os.path.join(directory, f".pmvr_export_{uuid.uuid4().hex[:12]}")
+    os.makedirs(folder)
+    return folder, os.path.join(folder, filename)
+
+
 def export_semantic_layer(context, layer, format_name):
     project = context.scene.pm_vr_project
-    objects = resolve_layer_objects(context, layer)
-    if not objects:
-        return "SKIPPED", "no visible objects for active state"
-    final_path = _export_path(project, layer, project.active_lighting_state, format_name)
-    temporary_path = collection_export.temporary_filepath(final_path)
+    # Export binds the active state's materials to canonical generated objects;
+    # put the viewport preview binding back afterwards.
+    bindings = snapshot_generated_bindings()
     assembly = None
+    folder = None
     try:
+        objects = resolve_layer_objects(context, layer)
+        if not objects:
+            return "SKIPPED", "no visible objects for active state"
+        final_path = _export_path(project, layer, project.active_lighting_state, format_name)
+        folder, temporary_path = _temporary_export_path(final_path)
         assembly = _make_assembly(context.scene, layer, objects)
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
         exporter = collection_export.export_usdz if format_name == 'USDZ' else collection_export.export_glb
         result = exporter(assembly, temporary_path)
         if 'CANCELLED' in result:
@@ -125,9 +164,10 @@ def export_semantic_layer(context, layer, format_name):
         os.replace(temporary_path, final_path)
         return "SUCCESS", final_path
     finally:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
         _remove_assembly(context.scene, assembly)
+        restore_generated_bindings(bindings)
+        if folder:
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
@@ -148,6 +188,10 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
 
     def execute(self, context):
         project = context.scene.pm_vr_project
+        duplicate_ids = duplicate_source_ids()
+        if duplicate_ids:
+            self.report({'ERROR'}, f"Export blocked: {len(duplicate_ids)} duplicate source ID(s); repair them first")
+            return {'CANCELLED'}
         try:
             activate_state(context, project.active_lighting_state)
         except Exception as exc:
@@ -169,6 +213,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             self.report({'ERROR'}, "Enabled render layers contain duplicate output names")
             return {'CANCELLED'}
         succeeded = skipped = failed = 0
+        first_error = ""
         cancelled = False
         project.operation_running = True
         try:
@@ -189,6 +234,8 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
                     break
                 except Exception as exc:
                     failed += 1
+                    if not first_error:
+                        first_error = f'{layer.display_name} ({format_name}): {exc}'
                     print(f'[PM VR][Export] Failed "{layer.display_name}" ({format_name}): {exc}')
             project.operation_progress = 1.0
         finally:
@@ -200,7 +247,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         project.last_operation_summary = summary
         self.report(
             {'WARNING'} if failed or cancelled else {'INFO'},
-            summary + ("; see console" if failed else ""),
+            summary + (f"; {first_error}" if first_error else ""),
         )
         return {'FINISHED'} if (succeeded or skipped) and not cancelled else {'CANCELLED'}
 

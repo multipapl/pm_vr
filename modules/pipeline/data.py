@@ -70,12 +70,17 @@ def _batch_resolution_changed(unit, context):
     _overlay_updated(unit, context)
 
 
+class PMVR_ExtraExportLayer(bpy.types.PropertyGroup):
+    layer_id: bpy.props.StringProperty(name="Export Layer ID", options={'HIDDEN'})
+
+
 class PMVR_ObjectMetadata(bpy.types.PropertyGroup):
     source_id: bpy.props.StringProperty(name="Source ID", options={'HIDDEN'})
     render_layer_id: bpy.props.StringProperty(name="Render Layer ID", options={'HIDDEN'})
     processing_role: bpy.props.EnumProperty(name="Role", items=ROLE_ITEMS, default='UNASSIGNED')
     bake_unit_id: bpy.props.StringProperty(name="Bake Unit ID", options={'HIDDEN'})
     is_registered_source: bpy.props.BoolProperty(name="Registered Source", default=False)
+    extra_export_layers: bpy.props.CollectionProperty(type=PMVR_ExtraExportLayer)
 
 
 class PMVR_RenderLayer(bpy.types.PropertyGroup):
@@ -244,6 +249,7 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
 
 
 CLASSES = (
+    PMVR_ExtraExportLayer,
     PMVR_ObjectMetadata,
     PMVR_RenderLayer,
     PMVR_BakeUnit,

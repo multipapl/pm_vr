@@ -100,7 +100,7 @@ def validate_unit(context, unit, require_visible=True):
                     if not alpha or (not alpha.is_linked and alpha.default_value >= 1.0):
                         issues.append(Issue(
                             'ERROR',
-                            f"Translucent material slot {slot_index} has no Alpha branch/value",
+                            f"Alpha material slot {slot_index} has no Alpha branch/value",
                             obj.name,
                         ))
         visible_count += int(object_render_visible(obj, context.view_layer))
@@ -146,6 +146,27 @@ def validate_all(context):
                 and parent.pm_vr_pipeline.render_layer_id != meta.render_layer_id
             ):
                 issues.append(Issue('ERROR', "Parent belongs to another render layer", obj.name))
+    for obj in bpy.data.objects:
+        if not hasattr(obj, "pm_vr_pipeline") or not obj.pm_vr_pipeline.is_registered_source:
+            continue
+        meta = obj.pm_vr_pipeline
+        if not meta.source_id:
+            issues.append(Issue('ERROR', "Registered source has no stable ID", obj.name))
+        owner = find_layer(project, meta.render_layer_id)
+        seen_targets = set()
+        for entry in meta.extra_export_layers:
+            target = find_layer(project, entry.layer_id)
+            if not target:
+                issues.append(Issue('ERROR', "Additional export layer is missing", obj.name))
+            elif entry.layer_id == meta.render_layer_id:
+                issues.append(Issue('ERROR', "Additional export repeats the object's primary layer", obj.name))
+            elif owner and target.layer_type != owner.layer_type:
+                issues.append(Issue('ERROR', f'Additional export to "{target.display_name}" has a different layer type', obj.name))
+            if entry.layer_id in seen_targets:
+                issues.append(Issue('ERROR', "Additional export layer is listed twice", obj.name))
+            seen_targets.add(entry.layer_id)
+        if meta.extra_export_layers and (not owner or meta.processing_role == 'UNASSIGNED'):
+            issues.append(Issue('ERROR', "Additional exports require a valid primary layer and role", obj.name))
     for unit in project.bake_units:
         issues.extend(validate_unit(context, unit, require_visible=False))
     artifact_keys = [unit.artifact_key for unit in project.bake_units if unit.artifact_key]

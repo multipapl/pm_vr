@@ -1,6 +1,7 @@
 """Keep Setup list navigation synchronized with the active viewport object."""
 
 import bpy
+from bpy.app.handlers import persistent
 
 from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_SOURCE_ID, TAG_UNIT_ID
 
@@ -162,7 +163,7 @@ def sync_now(scene, view_layer):
         _applying = False
 
 
-def register():
+def _subscribe():
     bpy.msgbus.clear_by_owner(_MSGBUS_OWNER)
     bpy.msgbus.subscribe_rna(
         key=(bpy.types.LayerObjects, "active"),
@@ -173,8 +174,22 @@ def register():
     )
 
 
+@persistent
+def _load_post(_filepath):
+    # Blender drops every message-bus subscription when a file is loaded.
+    _subscribe()
+
+
+def register():
+    _subscribe()
+    if _load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_load_post)
+
+
 def unregister():
     global _timer_pending
+    if _load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_load_post)
     bpy.msgbus.clear_by_owner(_MSGBUS_OWNER)
     if bpy.app.timers.is_registered(_flush):
         bpy.app.timers.unregister(_flush)

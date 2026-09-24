@@ -2,7 +2,7 @@
 
 import bpy
 
-from .identity import find_layer, find_unit, layer_members, unit_members
+from .identity import extra_export_members, find_layer, find_unit, layer_members, unit_members
 from .setup_ops import active_layer, active_unit
 
 
@@ -123,6 +123,13 @@ def draw_setup(layout, context):
         selected_box.label(text=f"Role: {meta.bl_rna.properties['processing_role'].enum_items[meta.processing_role].name}")
         if meta.processing_role == 'BAKE':
             selected_box.label(text=f"Unit: {selected_unit.display_name if selected_unit else 'Missing'}")
+        extra_names = [
+            target.display_name
+            for entry in meta.extra_export_layers
+            if (target := find_layer(project, entry.layer_id))
+        ]
+        if extra_names:
+            selected_box.label(text=f"Also exports to: {', '.join(extra_names)}", icon='EXPORT')
 
 def draw_bake(layout, context):
     project = context.scene.pm_vr_project
@@ -156,13 +163,15 @@ def draw_bake(layout, context):
     op = test_resolution.operator("pmvr.scale_queued_resolution", text="×2")
     op.direction = 'DOUBLE'
     run = queue.row()
-    run.enabled = not project.operation_running
     run.scale_y = 1.4
-    run.operator(
-        "pmvr.bake_queue",
-        text=f"Bake {len(project.bake_queue)} Queued Unit(s) • {mode_label}",
-        icon='RENDER_STILL',
-    )
+    if project.operation_running:
+        run.operator("pmvr.cancel_bake_queue", text="Cancel Bake (Esc)", icon='CANCEL')
+    else:
+        run.operator(
+            "pmvr.bake_queue",
+            text=f"Bake {len(project.bake_queue)} Queued Unit(s) • {mode_label}",
+            icon='RENDER_STILL',
+        )
     if project.last_operation_summary:
         layout.label(text=project.last_operation_summary, icon='INFO')
 
@@ -195,6 +204,26 @@ def draw_export(layout, context):
         row.prop(layer, "export_glb", toggle=True)
         suffix = "" if project.active_lighting_state == 'DAY' else "_Evening"
         box.label(text=f"Output: {layer.display_name}{suffix}", icon='FILE')
+        extras = box.box()
+        guests = extra_export_members(layer.layer_id)
+        extras.label(text=f"Additional objects in this export: {len(guests)}", icon='EXPORT')
+        row = extras.row(align=True)
+        row.enabled = bool(context.selected_objects)
+        op = row.operator("pmvr.edit_extra_exports", text="Include Selected", icon='ADD')
+        op.action = 'ADD'
+        op = row.operator("pmvr.edit_extra_exports", text="Remove Selected", icon='REMOVE')
+        op.action = 'REMOVE'
+        if guests:
+            for obj in sorted(guests, key=lambda item: item.name.casefold()):
+                guest_row = extras.row(align=True)
+                guest_row.label(text=obj.name, icon='OBJECT_DATA')
+                op = guest_row.operator("pmvr.edit_extra_exports", text="", icon='X')
+                op.action = 'REMOVE'
+                op.source_id = obj.pm_vr_pipeline.source_id
+            op = extras.operator("pmvr.select_pipeline_items", text="Select Additional Objects", icon='RESTRICT_SELECT_OFF')
+            op.target = 'LAYER_EXPORT_GUESTS'
+        else:
+            extras.label(text="Select sources from another layer of this type.", icon='INFO')
     buttons = layout.row(align=True)
     for format_name in ('USDZ', 'GLB', 'BOTH'):
         op = buttons.operator("pmvr.export_semantic_layers", text="Both" if format_name == 'BOTH' else format_name, icon='EXPORT')

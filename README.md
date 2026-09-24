@@ -41,6 +41,16 @@ mesh geometry, materials, UV coordinates, modifiers, and collection membership a
 The first UV channel is activated for baking as a safety measure; authored UV data is unchanged.
 Generated objects remain separate and are owned through stable IDs rather than names.
 
+Each unit is committed as a transaction: the PNG is written beside its final
+path and replaces the previous file only after the generated result has been
+prepared and checked. A unit that fails or is cancelled leaves the previous
+PNG, generated mesh and materials current. Press **Esc** (or **Cancel Bake**)
+to stop the whole queue: the running Cycles pass stops, the unit in progress
+is discarded, and units finished earlier in the queue are kept. Adding or
+removing layers and units is disabled while a bake runs. Day and Evening
+materials are both kept in the `.blend` even though a generated object shows
+one state at a time.
+
 Every semantic layer has one authoritative type: `Unlit`, `PBR`, `Alpha`,
 `Translucent`, `Glass`, `Emissive`, or `Runtime`. The type directly
 defines both its runtime meaning and Blender behavior:
@@ -61,7 +71,21 @@ scene meshes. Bake Status, Render Layers, and Bake Units become available after
 the semantic pipeline is initialized.
 
 Day uses the base output filename; Evening adds `_Evening`. Export is blocked when
-the current state has no compatible Beauty artifact.
+the current state has no compatible Beauty artifact, when that state's generated
+materials are missing, or when a generated object has been duplicated. Export
+temporarily shows the exported state's materials and restores the viewport
+preview afterwards. A baked child whose parent is baked in another unit of the
+same layer stays parented to that generated parent.
+
+To include a source object in another layer's export file, open **Export**,
+select the destination layer, select the source objects in the viewport, and
+click **Include Selected**. The box lists additional objects in that file;
+the `X` beside an object removes its assignment, while **Select Additional
+Objects** and **Remove Selected** support batch changes. One source may be
+included in several additional layers of the same type. Its primary layer and
+bake unit stay unchanged, so no second bake is needed. The output files contain
+the selected geometry and its existing
+materials/textures; no separate manifest is generated.
 
 Lightmap uses the same unit queue and shared atlas, but produces separate
 scene-linear EXR images and generated objects/materials. Switching modes never

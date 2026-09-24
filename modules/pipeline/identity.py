@@ -63,6 +63,26 @@ def layer_members(layer_id):
     ]
 
 
+def extra_export_members(layer_id):
+    return [
+        obj for obj in bpy.data.objects
+        if hasattr(obj, "pm_vr_pipeline")
+        and obj.pm_vr_pipeline.is_registered_source
+        and any(entry.layer_id == layer_id for entry in obj.pm_vr_pipeline.extra_export_layers)
+    ]
+
+
+def export_layer_members(layer_id):
+    """Resolve a file's sources without changing their bake-layer ownership."""
+    members = layer_members(layer_id)
+    seen = {obj.as_pointer() for obj in members}
+    for obj in extra_export_members(layer_id):
+        if obj.as_pointer() not in seen:
+            members.append(obj)
+            seen.add(obj.as_pointer())
+    return members
+
+
 def unit_members(unit_id):
     return [
         obj for obj in bpy.data.objects

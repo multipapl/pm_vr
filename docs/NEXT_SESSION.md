@@ -1,5 +1,25 @@
 # Next session
 
+## Audit 2026-09-24 — fixed and reproduced in Blender 5.2.2
+
+- Day/Evening materials: a canonical generated object shows one state, so the other state's material had no user and Blender dropped it on save. After reopen, Day export silently embedded the Evening texture. Committed generated materials now carry a fake user (released when replaced, when their source leaves the unit, or when the unit is removed), existing files are protected on load, and export refuses a unit whose state materials are missing.
+- Material binding (export and Apply Preview) used `materials.clear()`, which resets every polygon to slot 0 and permanently collapsed PBR/Alpha multi-slot generated meshes. Binding now assigns slots in place, is strict for export, and export restores the previous preview binding.
+- Bake transaction: the Beauty PNG (and Lightmap EXR) replaced the previous file before the commit; a later failure left the previous result overwritten, the generated mesh replaced and the object bound to temporary `__PMVR_WORK_MAT` materials. Files are now staged beside the final path, commit preconditions (material-slot counts, e.g. a Geometry Nodes Set Material) are checked before anything changes, and the previous file is restored on failure.
+- Cancellation: Esc inside the Cycles job was consumed by the job's own modal handler, so the queue continued and committed a partially baked atlas as Ready. `object_bake_cancel` now cancels the whole queue; the unit in progress is discarded (recorded as CANCELLED) and earlier units are kept. A Cancel Bake button stops after the current Cycles pass. Lightmap mode stays synchronous; a cancelled Cycles pass there now stops the queue instead of continuing with the next unit.
+- A running bake held Python references to `bake_units`/`render_layers` items, which move when those collections grow or shrink. Structural edits are disabled while a bake runs and the runtime resolves its unit/layer by ID.
+- Setup selection sync used a message-bus subscription that Blender drops on every file load, so it never worked in an opened file. It is re-subscribed in `load_post` (also the overlay's UV-edit subscription).
+- USDZ files were exported under `<name>.pmvr_tmp.usdz`, and that temporary stem became the package's root layer name. Export now writes the final filename inside a private temporary folder.
+- A baked child whose parent was baked in another unit of the same layer lost its hierarchy in export. It is now parented to that generated parent (linked in either bake order), and removing a generated parent no longer shifts its children.
+- Export refuses duplicated generated objects instead of exporting whichever copy is found first.
+- Reload Scripts re-imports the nested `pipeline` and `lightmap_baker` packages.
+- Regression coverage: `tests/blender_pipeline_integrity_smoke.py` (background) and the interactive `tests/blender_gui_bake_cancel.py`, `tests/blender_gui_selection_sync.py` (see their docstrings for the command lines).
+
+## Audit follow-ups not changed
+
+- Export Original children of a baked parent keep the source parent as a transform-only USD Xform; GLB flattens them to the root. World transforms are correct in both.
+- Generated objects are named after their source at creation (`Name.001`) and keep that name after the source is renamed; exported prim names follow the generated object.
+- Memory, measured on an RTX 3090 (OptiX, 24 Beauty bakes of 4K units): VRAM stayed flat between units (about +1.2 GB over idle, peak 5.9 GB during a bake). Process RAM grew about 0.5 GB per 4K unit and levelled off near 13 GB by the 24th bake. Per-stage measurement places the growth at the Beauty denoise step; the denoise alone does not grow in isolation, and freeing the committed image buffers did not change it. Not investigated further; watch RAM in Task Manager during the first long 8K queue.
+
 ## Unified layer taxonomy
 
 - One authoritative `layer_type` drives both runtime meaning and Blender bake/export behavior; there is no parallel processing-profile entity.

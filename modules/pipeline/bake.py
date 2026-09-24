@@ -10,7 +10,7 @@ import uuid
 import bpy
 
 from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image
-from ..lightmap_baker.images import create_float_image, remove_image, save_linear_exr
+from ..lightmap_baker.images import StagedExport, create_float_image, remove_image, save_linear_exr
 from ..lightmap_baker.material import add_lightmap_nodes
 from ..lightmap_baker.progress import BakeProgressFeedback
 from ..lightmap_baker.receiver import _wrap_surface_for_bake
@@ -538,7 +538,7 @@ def _copied_materials(unit, source, layer, state, image):
             if layer.layer_type == 'ALPHA':
                 alpha = principled[0].inputs.get("Alpha")
                 if not alpha or (not alpha.is_linked and alpha.default_value >= 1.0):
-                    raise PipelineBakeError(f'{source.name}: translucent material slot {slot} has no Alpha branch/value')
+                    raise PipelineBakeError(f'{source.name}: Alpha material slot {slot} has no Alpha branch/value')
                 base = principled[0].inputs.get("Base Color")
                 for socket in principled[0].inputs:
                     if socket != alpha and socket != base:
@@ -581,29 +581,184 @@ def _state_materials(unit_id, source_id, state, mode='BEAUTY'):
     return sorted(materials, key=lambda item: int(item.get(TAG_MATERIAL_SLOT, 0)))
 
 
-def bind_generated_state(unit, state, mode='BEAUTY'):
+def protect_generated_material(material):
+    # A canonical generated object shows one state at a time. The other state's
+    # material has no object user and Blender would drop it on save.
+    if material.get(TAG_GENERATED) and not material.use_fake_user:
+        material.use_fake_user = True
+
+
+def release_generated_material(material):
+    """Remove a PM VR-owned material once nothing but its fake user holds it."""
+    try:
+        if material.get(TAG_GENERATED):
+            material.use_fake_user = False
+        if material.users == 0:
+            bpy.data.materials.remove(material)
+    except ReferenceError:
+        pass
+
+
+def protect_all_generated_materials():
+    for material in bpy.data.materials:
+        protect_generated_material(material)
+
+
+def _assign_materials_in_place(mesh, materials):
+    # Assignment by index preserves polygon.material_index; clear() would
+    # silently collapse every polygon to slot 0.
+    if len(mesh.materials) != len(materials):
+        raise PipelineBakeError(
+            f"generated mesh has {len(mesh.materials)} material slot(s) "
+            f"but {len(materials)} state material(s) exist"
+        )
+    for index, material in enumerate(materials):
+        if mesh.materials[index] != material:
+            mesh.materials[index] = material
+
+
+def bind_generated_state(unit, state, mode='BEAUTY', strict=False):
+    """Show one state's generated materials; strict mode refuses partial binds."""
     bound = 0
     for obj in _live_generated_objects(unit.unit_id, mode):
         source_id = obj.get(TAG_SOURCE_ID, "")
         materials = _state_materials(unit.unit_id, source_id, state, mode)
-        if not materials:
+        try:
+            if not materials:
+                raise PipelineBakeError(
+                    f"{state.title()} {mode.title()} materials are missing; "
+                    f"rebake {state.title()}"
+                )
+            _assign_materials_in_place(obj.data, materials)
+        except PipelineBakeError as exc:
+            if strict:
+                raise PipelineBakeError(f"{obj.name}: {exc}") from exc
             continue
-        obj.data.materials.clear()
-        for material in materials:
-            obj.data.materials.append(material)
         obj[TAG_STATE] = state
         bound += 1
     return bound
 
 
-def _commit_generated_geometry(context, unit, layer, receivers, signature, mode='BEAUTY'):
-    generated_collection = _collection(GENERATED_COLLECTION)
-    _ensure_scene_collection(context.scene, generated_collection)
-    previous_signature = (
+def snapshot_generated_bindings(mode='BEAUTY'):
+    return [
+        (obj, list(obj.data.materials), obj.get(TAG_STATE))
+        for obj in bpy.data.objects
+        if obj.get(TAG_GENERATED) and obj.get(TAG_MODE) == mode and obj.type == 'MESH'
+    ]
+
+
+def restore_generated_bindings(snapshot):
+    for obj, materials, state in snapshot:
+        try:
+            _assign_materials_in_place(obj.data, materials)
+            if state is not None:
+                obj[TAG_STATE] = state
+        except (PipelineBakeError, ReferenceError):
+            pass
+
+
+def _previous_signature(unit, mode):
+    return (
         (unit.day_signature or unit.evening_signature)
         if mode == 'BEAUTY'
         else (unit.day_lightmap_signature or unit.evening_lightmap_signature)
     )
+
+
+def _check_commit(unit, layer, receivers, staged, signature, mode='BEAUTY'):
+    """Reject an uncommittable result before any artifact is replaced."""
+    previous_signature = _previous_signature(unit, mode)
+    compatible = not previous_signature or previous_signature == signature
+    collapse_to_one = mode == 'BEAUTY' and layer.layer_type in UNLIT_LAYER_TYPES
+    for receiver in receivers:
+        source = receiver["source"]
+        source_id = source.pm_vr_pipeline.source_id
+        materials = staged.get(source_id)
+        if not materials:
+            raise PipelineBakeError(f'{source.name}: no output materials were prepared')
+        generated = _find_generated(unit.unit_id, source_id, mode)
+        mesh = generated.data if generated and compatible else receiver["mesh"]
+        if not collapse_to_one and len(mesh.materials) != len(materials):
+            raise PipelineBakeError(
+                f'{source.name}: evaluated mesh has {len(mesh.materials)} '
+                f'material slot(s) but the source object has {len(materials)}; '
+                f'a modifier probably adds or removes materials'
+            )
+
+
+def remove_generated_object(obj):
+    """Delete a generated object without shifting generated children."""
+    for child in list(obj.children):
+        world = child.matrix_world.copy()
+        child.parent = None
+        child.matrix_world = world
+    mesh = obj.data if obj.type == 'MESH' else None
+    bpy.data.objects.remove(obj, do_unlink=True)
+    if mesh and mesh.users == 0:
+        bpy.data.meshes.remove(mesh)
+
+
+def _generated_parent(source, unit, layer, generated_by_source, mode):
+    """Mirror the source parent inside the same render layer."""
+    parent = source.parent
+    if not parent or not hasattr(parent, "pm_vr_pipeline"):
+        return None
+    parent_meta = parent.pm_vr_pipeline
+    if parent_meta.processing_role == 'BAKE' and parent_meta.bake_unit_id == unit.unit_id:
+        return generated_by_source.get(parent_meta.source_id)
+    if parent_meta.render_layer_id != layer.layer_id:
+        return None
+    if parent_meta.processing_role == 'BAKE':
+        # Baked in another unit of this layer; linked once that unit exists.
+        return _find_generated(parent_meta.bake_unit_id, parent_meta.source_id, mode)
+    if parent_meta.processing_role == 'EXPORT_ORIGINAL':
+        return parent
+    return None
+
+
+def _relink_generated_children(unit, layer, generated_by_source, mode):
+    """Attach generated children from other units that were baked earlier."""
+    parents_by_source_object = {}
+    for obj in bpy.data.objects:
+        metadata = getattr(obj, "pm_vr_pipeline", None)
+        if (
+            metadata
+            and metadata.is_registered_source
+            and metadata.processing_role == 'BAKE'
+            and metadata.bake_unit_id == unit.unit_id
+        ):
+            target = generated_by_source.get(metadata.source_id)
+            if target:
+                parents_by_source_object[obj.as_pointer()] = target
+    if not parents_by_source_object:
+        return
+    for child_source in bpy.data.objects:
+        parent = child_source.parent
+        if not parent or parent.as_pointer() not in parents_by_source_object:
+            continue
+        metadata = getattr(child_source, "pm_vr_pipeline", None)
+        if (
+            not metadata
+            or metadata.processing_role != 'BAKE'
+            or metadata.bake_unit_id == unit.unit_id
+            or metadata.render_layer_id != layer.layer_id
+        ):
+            continue
+        child = _find_generated(metadata.bake_unit_id, metadata.source_id, mode)
+        target = parents_by_source_object[parent.as_pointer()]
+        if not child or child.parent == target:
+            continue
+        world = child.matrix_world.copy()
+        child.parent = target
+        child.parent_type = child_source.parent_type
+        child.parent_bone = child_source.parent_bone if child_source.parent_type == 'BONE' else ""
+        child.matrix_world = world
+
+
+def _commit_generated_geometry(context, unit, layer, receivers, signature, mode='BEAUTY'):
+    generated_collection = _collection(GENERATED_COLLECTION)
+    _ensure_scene_collection(context.scene, generated_collection)
+    previous_signature = _previous_signature(unit, mode)
     compatible = not previous_signature or previous_signature == signature
     for receiver in receivers:
         source = receiver["source"]
@@ -635,30 +790,33 @@ def _commit_generated_geometry(context, unit, layer, receivers, signature, mode=
         generated.hide_set(False)
     live_source_ids = {receiver["source"].pm_vr_pipeline.source_id for receiver in receivers}
     for generated in _live_generated_objects(unit.unit_id, mode):
-        if generated.get(TAG_SOURCE_ID) not in live_source_ids:
-            mesh = generated.data
-            bpy.data.objects.remove(generated, do_unlink=True)
-            if mesh and mesh.users == 0:
-                bpy.data.meshes.remove(mesh)
+        stale_source_id = generated.get(TAG_SOURCE_ID)
+        if stale_source_id not in live_source_ids:
+            remove_generated_object(generated)
+            for material in list(bpy.data.materials):
+                if (
+                    material.get(TAG_GENERATED)
+                    and material.get(TAG_UNIT_ID) == unit.unit_id
+                    and material.get(TAG_MODE) == mode
+                    and stale_source_id
+                    and material.get(TAG_SOURCE_ID) == stale_source_id
+                ):
+                    release_generated_material(material)
     generated_by_source = {
         obj.get(TAG_SOURCE_ID): obj for obj in _live_generated_objects(unit.unit_id, mode)
     }
     for receiver in receivers:
         source = receiver["source"]
         generated = generated_by_source.get(source.pm_vr_pipeline.source_id)
-        parent = source.parent
-        target_parent = None
-        if parent and hasattr(parent, "pm_vr_pipeline"):
-            parent_meta = parent.pm_vr_pipeline
-            if parent_meta.processing_role == 'BAKE' and parent_meta.bake_unit_id == unit.unit_id:
-                target_parent = generated_by_source.get(parent_meta.source_id)
-            elif parent_meta.processing_role == 'EXPORT_ORIGINAL' and parent_meta.render_layer_id == layer.layer_id:
-                target_parent = parent
-        world = generated.matrix_world.copy()
+        target_parent = _generated_parent(source, unit, layer, generated_by_source, mode)
         generated.parent = target_parent
         generated.parent_type = source.parent_type if target_parent else 'OBJECT'
         generated.parent_bone = source.parent_bone if target_parent and source.parent_type == 'BONE' else ""
-        generated.matrix_world = world
+        # Generated geometry lives in the source's object space. Re-derive the
+        # world transform from the source so removing or replacing a generated
+        # parent above can never shift this object.
+        generated.matrix_world = source.matrix_world.copy()
+    _relink_generated_children(unit, layer, generated_by_source, mode)
     if mode == 'BEAUTY' and not compatible:
         if unit.day_signature and unit.day_signature != signature:
             unit.day_status = "Structurally incompatible — rebake required"
@@ -733,8 +891,10 @@ def _commit_materials(unit, layer, members, state, staged, created, mode='BEAUTY
             for material in materials:
                 unique_old.setdefault(material.as_pointer(), material)
         for material in unique_old.values():
-            if material not in created and material.users == 0:
-                bpy.data.materials.remove(material)
+            if material not in created:
+                release_generated_material(material)
+        for material in created:
+            protect_generated_material(material)
         return created
     except Exception:
         for material in created:
@@ -776,12 +936,31 @@ def _prepare_lightmap_materials(unit, layer, members, state, image):
         raise
 
 
-def _save_beauty_image(context, unit, state, image):
-    project = context.scene.pm_vr_project
-    if project.beauty_output_directory.startswith("//") and not bpy.data.filepath:
-        raise PipelineBakeError("Save the .blend file before using a relative Beauty directory")
-    directory = bpy.path.abspath(project.beauty_output_directory)
+def _output_directory(value, label):
+    if value.startswith("//") and not bpy.data.filepath:
+        raise PipelineBakeError(f"Save the .blend file before using a relative {label} directory")
+    directory = bpy.path.abspath(value)
     os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def _staging_path(final_path):
+    directory, filename = os.path.split(final_path)
+    stem, extension = os.path.splitext(filename)
+    return os.path.join(directory, f".{stem}.pmvr_tmp_{uuid.uuid4().hex[:12]}{extension}")
+
+
+def _point_image_at_file(image, filepath, file_format):
+    image.filepath = bpy.path.relpath(filepath) if bpy.data.filepath else filepath
+    image.filepath_raw = image.filepath
+    image.source = 'FILE'
+    image.file_format = file_format
+    image.reload()
+
+
+def _beauty_final_path(context, unit, state):
+    project = context.scene.pm_vr_project
+    directory = _output_directory(project.beauty_output_directory, "Beauty")
     suffix = "" if state == 'DAY' else "_Evening"
     layer = find_layer(project, unit.render_layer_id)
     layer_name = layer.display_name if layer else "Layer"
@@ -799,8 +978,16 @@ def _save_beauty_image(context, unit, state, image):
             f'Beauty filename conflict: rename unit "{unit.display_name}" '
             f'or "{collision.display_name}"'
         )
-    filepath = os.path.join(directory, f"{stem}{suffix}_Beauty.png")
-    staging = f"{filepath}.pmvr_tmp.png"
+    return os.path.join(directory, f"{stem}{suffix}_Beauty.png")
+
+
+def _stage_beauty_image(context, unit, state, image):
+    """Write the Beauty PNG beside its final path; the final file is untouched."""
+    staged = StagedExport(
+        _beauty_final_path(context, unit, state),
+        "",
+    )
+    staged.staging_path = _staging_path(staged.final_path)
     export_scene = bpy.data.scenes.new(
         f"__PMVR_BEAUTY_EXPORT_{uuid.uuid4().hex}"
     )
@@ -827,19 +1014,15 @@ def _save_beauty_image(context, unit, state, image):
             )
         except (AttributeError, TypeError, ValueError):
             pass
-        image.save_render(staging, scene=export_scene)
-        os.replace(staging, filepath)
+        image.save_render(staged.staging_path, scene=export_scene)
+        # Later stages (denoise, material preview) read the staged pixels.
+        _point_image_at_file(image, staged.staging_path, 'PNG')
+    except Exception:
+        staged.cleanup()
+        raise
     finally:
-        if os.path.exists(staging):
-            os.remove(staging)
         bpy.data.scenes.remove(export_scene)
-    image.filepath = bpy.path.relpath(filepath) if bpy.data.filepath else filepath
-    image.filepath_raw = image.filepath
-    image.source = 'FILE'
-    image.file_format = 'PNG'
-    image.reload()
-    log.info("Beauty", f'Saved external image: "{filepath}"')
-    return filepath
+    return staged
 
 
 def _beauty_image_name(layer, unit, state):
@@ -849,26 +1032,27 @@ def _beauty_image_name(layer, unit, state):
     )
 
 
-def _save_lightmap_image(context, unit, state, image):
+def _stage_lightmap_image(context, unit, state, image):
     project = context.scene.pm_vr_project
-    if project.lightmap_output_directory.startswith("//") and not bpy.data.filepath:
-        raise PipelineBakeError("Save the .blend file before using a relative Lightmap directory")
-    directory = bpy.path.abspath(project.lightmap_output_directory)
-    os.makedirs(directory, exist_ok=True)
+    directory = _output_directory(project.lightmap_output_directory, "Lightmap")
     suffix = "" if state == 'DAY' else "_Evening"
-    filepath = os.path.join(
+    final_path = os.path.join(
         directory,
         f"{safe_stem(unit.display_name)}_{unit.artifact_key[:8]}{suffix}_LM.exr",
     )
-    staging = f"{filepath}.pmvr_tmp.exr"
-    save_linear_exr(image, staging)
-    os.replace(staging, filepath)
-    image.filepath = bpy.path.relpath(filepath) if bpy.data.filepath else filepath
-    image.filepath_raw = image.filepath
-    image.source = 'FILE'
-    image.file_format = 'OPEN_EXR'
-    image.reload()
-    return filepath
+    staged = StagedExport(final_path, _staging_path(final_path))
+    try:
+        save_linear_exr(image, staged.staging_path)
+    except Exception:
+        staged.cleanup()
+        raise
+    return staged
+
+
+def _commit_staged_file(staged, image, file_format):
+    """Atomically publish a staged file; the previous file stays as backup."""
+    staged.commit()
+    _point_image_at_file(image, staged.final_path, file_format)
 
 
 def _record(project, unit, state, signature, image, status, message="", mode='BEAUTY'):
@@ -895,10 +1079,10 @@ class BeautyBakeRuntime:
     def __init__(self, context, unit, operator=None):
         self.context = context
         self.project = context.scene.pm_vr_project
-        self.unit = unit
+        self.unit_id = unit.unit_id
         self.operator = operator
-        self.layer = find_layer(self.project, unit.render_layer_id)
         self.state = self.project.active_lighting_state
+        self._resolve()
         self.members = []
         self.receivers = []
         self.image = None
@@ -908,7 +1092,18 @@ class BeautyBakeRuntime:
         self.config = None
         self.work_collection = None
         self.created_materials = []
+        self.warnings = []
         self.finished = False
+
+    def _resolve(self):
+        # Collection items move in memory when the collection grows or shrinks;
+        # look the unit and layer up by stable ID instead of holding them.
+        self.unit = find_unit(self.project, self.unit_id)
+        if not self.unit:
+            raise PipelineBakeError("bake unit was removed during the bake")
+        self.layer = find_layer(self.project, self.unit.render_layer_id)
+        if not self.layer:
+            raise PipelineBakeError(f'unit "{self.unit.display_name}" has no render layer')
 
     def prepare(self):
         issues = validate_unit(self.context, self.unit, require_visible=True)
@@ -976,6 +1171,7 @@ class BeautyBakeRuntime:
         return "READY"
 
     def select_receiver(self, index):
+        self._resolve()
         receiver = self.receivers[index]
         _set_target_image(receiver, self.image)
         _select_only(self.context, receiver["object"])
@@ -1002,66 +1198,90 @@ class BeautyBakeRuntime:
         })
 
     def finish(self):
+        self._resolve()
+        step_count = len(self.receivers) + 3
         _show_bake_stage(
             self.operator,
             "Save external Beauty",
             len(self.receivers) + 1,
-            len(self.receivers) + 3,
+            step_count,
         )
         # Match SimpleBake: establish an external file before compositor work.
-        filepath = _save_beauty_image(
+        # It is staged beside the final path; the previous successful file is
+        # replaced only after every Blender-side step has been prepared.
+        staged_file = _stage_beauty_image(
             self.context, self.unit, self.state, self.image
         )
+        published = False
         try:
             _show_bake_stage(
                 self.operator,
                 "Compositor denoise",
                 len(self.receivers) + 2,
-                len(self.receivers) + 3,
+                step_count,
             )
-            denoise_external_beauty(
-                self.context.scene,
-                self.image,
-                filepath,
-            )
-        except Exception as exc:
-            if self.operator:
-                self.operator.report(
-                    {'WARNING'},
-                    f"Denoise failed; using raw Beauty: {exc}",
+            try:
+                denoise_external_beauty(
+                    self.context.scene,
+                    self.image,
+                    staged_file.staging_path,
                 )
-            print(
-                f"[PM VR][Beauty] Denoise warning for "
-                f"{self.unit.display_name}: {exc}"
+            except Exception as exc:
+                self.warnings.append(f"denoise failed, raw Beauty used: {exc}")
+                if self.operator:
+                    self.operator.report(
+                        {'WARNING'},
+                        f"Denoise failed; using raw Beauty: {exc}",
+                    )
+                log.warning(
+                    "Beauty",
+                    f'{self.unit.display_name}: denoise failed; using raw Beauty: {exc}',
+                )
+            _show_bake_stage(
+                self.operator,
+                "Build preview result",
+                len(self.receivers) + 3,
+                step_count,
             )
-        _show_bake_stage(
-            self.operator,
-            "Build preview result",
-            len(self.receivers) + 3,
-            len(self.receivers) + 3,
-        )
-        staged, self.created_materials = _prepare_materials(
-            self.unit,
-            self.layer,
-            self.members,
-            self.state,
-            self.image,
-        )
-        _commit_generated_geometry(
-            self.context,
-            self.unit,
-            self.layer,
-            self.receivers,
-            self.signature,
-        )
-        _commit_materials(
-            self.unit,
-            self.layer,
-            self.members,
-            self.state,
-            staged,
-            self.created_materials,
-        )
+            staged, self.created_materials = _prepare_materials(
+                self.unit,
+                self.layer,
+                self.members,
+                self.state,
+                self.image,
+            )
+            _check_commit(
+                self.unit,
+                self.layer,
+                self.receivers,
+                staged,
+                self.signature,
+            )
+            _commit_staged_file(staged_file, self.image, 'PNG')
+            published = True
+            _commit_generated_geometry(
+                self.context,
+                self.unit,
+                self.layer,
+                self.receivers,
+                self.signature,
+            )
+            _commit_materials(
+                self.unit,
+                self.layer,
+                self.members,
+                self.state,
+                staged,
+                self.created_materials,
+            )
+        except Exception:
+            if published:
+                staged_file.rollback()
+            raise
+        finally:
+            staged_file.cleanup()
+        staged_file.finalize()
+        log.info("Beauty", f'Saved external image: "{staged_file.final_path}"')
         old_image_name = (
             self.unit.day_beauty_image
             if self.state == 'DAY'
@@ -1105,6 +1325,7 @@ class BeautyBakeRuntime:
             self.signature,
             self.image,
             "SUCCESS",
+            "; ".join(self.warnings),
         )
         viewport_overlay.mark_baked(
             self.project,
@@ -1119,20 +1340,48 @@ class BeautyBakeRuntime:
         )
         self.cleanup(keep_image=True)
 
+    def _label(self):
+        try:
+            self._resolve()
+        except PipelineBakeError:
+            return None
+        return self.unit.display_name
+
     def fail(self, exc):
+        label = self._label()
         log.error(
             "Beauty",
-            f'Failed {self.state.title()} unit "{self.unit.display_name}": {exc}',
+            f'Failed {self.state.title()} unit "{label or self.unit_id}": {exc}',
         )
-        _record(
-            self.project,
-            self.unit,
-            self.state,
-            "",
-            self.image,
-            "FAILED",
-            str(exc),
+        if label is not None:
+            _record(
+                self.project,
+                self.unit,
+                self.state,
+                "",
+                self.image,
+                "FAILED",
+                str(exc),
+            )
+        self.cleanup(keep_image=False)
+
+    def cancel(self, reason):
+        label = self._label()
+        log.warning(
+            "Beauty",
+            f'Cancelled {self.state.title()} unit "{label or self.unit_id}": '
+            f'{reason}; previous result kept',
         )
+        if label is not None:
+            _record(
+                self.project,
+                self.unit,
+                self.state,
+                "",
+                None,
+                "CANCELLED",
+                reason,
+            )
         self.cleanup(keep_image=False)
 
     def cleanup(self, keep_image=False):
@@ -1257,19 +1506,31 @@ def bake_lightmap_unit(context, unit, operator=None):
         staged, created_materials = _prepare_lightmap_materials(
             unit, layer, members, state, raw
         )
-        _save_lightmap_image(context, unit, state, raw)
-        _commit_generated_geometry(
-            context, unit, layer, receivers, signature, mode='LIGHTMAP'
-        )
-        _commit_materials(
-            unit,
-            layer,
-            members,
-            state,
-            staged,
-            created_materials,
-            mode='LIGHTMAP',
-        )
+        _check_commit(unit, layer, receivers, staged, signature, mode='LIGHTMAP')
+        staged_file = _stage_lightmap_image(context, unit, state, raw)
+        published = False
+        try:
+            _commit_staged_file(staged_file, raw, 'OPEN_EXR')
+            published = True
+            _commit_generated_geometry(
+                context, unit, layer, receivers, signature, mode='LIGHTMAP'
+            )
+            _commit_materials(
+                unit,
+                layer,
+                members,
+                state,
+                staged,
+                created_materials,
+                mode='LIGHTMAP',
+            )
+        except Exception:
+            if published:
+                staged_file.rollback()
+            raise
+        finally:
+            staged_file.cleanup()
+        staged_file.finalize()
         if state == 'DAY':
             old_image_name = unit.day_lightmap_image
             unit.day_lightmap_signature = signature
@@ -1312,6 +1573,97 @@ def bake_lightmap_unit(context, unit, operator=None):
         context_state.restore(context)
 
 
+# Cycles bake jobs report cancellation only through app handlers: the job's
+# own modal handler consumes Esc before the queue operator can see it.
+_BAKE_JOB = {"cancelled": False, "completed": False}
+_QUEUE = {"running": False, "cancel_requested": False}
+
+
+def _on_bake_job_cancel(*_args):
+    _BAKE_JOB["cancelled"] = True
+
+
+def _on_bake_job_complete(*_args):
+    _BAKE_JOB["completed"] = True
+
+
+def _bake_job_handler_lists():
+    handlers = bpy.app.handlers
+    return (
+        (getattr(handlers, "object_bake_cancel", None), _on_bake_job_cancel),
+        (getattr(handlers, "object_bake_complete", None), _on_bake_job_complete),
+    )
+
+
+def _remove_bake_job_handlers():
+    for handler_list, callback in _bake_job_handler_lists():
+        if handler_list is None:
+            continue
+        # Match by name so a reloaded module also removes stale callbacks.
+        for existing in list(handler_list):
+            if (
+                getattr(existing, "__name__", "") == callback.__name__
+                and getattr(existing, "__module__", "") == __name__
+            ):
+                handler_list.remove(existing)
+
+
+def _install_bake_job_handlers():
+    _remove_bake_job_handlers()
+    for handler_list, callback in _bake_job_handler_lists():
+        if handler_list is not None:
+            handler_list.append(callback)
+
+
+def _reset_bake_job_flags():
+    _BAKE_JOB["cancelled"] = False
+    _BAKE_JOB["completed"] = False
+
+
+def shutdown():
+    """Detach bake-job handlers when the add-on is unregistered."""
+    _remove_bake_job_handlers()
+    _QUEUE["running"] = False
+    _QUEUE["cancel_requested"] = False
+
+
+def _ensure_object_mode(context):
+    obj = getattr(context, "active_object", None)
+    if obj and obj.mode != 'OBJECT':
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except RuntimeError:
+            pass
+
+
+class PMVR_OT_CancelBakeQueue(bpy.types.Operator):
+    bl_idname = "pmvr.cancel_bake_queue"
+    bl_label = "Cancel Bake"
+    bl_description = (
+        "Stop the running bake queue. The unit in progress is discarded and "
+        "earlier results stay unchanged. Esc also stops a running Cycles pass "
+        "immediately"
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.scene and context.scene.pm_vr_project.operation_running)
+
+    def execute(self, context):
+        if not _QUEUE["running"]:
+            # No queue owns the flag (for example after an interrupted run);
+            # release the Bake button instead of leaving it disabled.
+            context.scene.pm_vr_project.operation_running = False
+            self.report({'INFO'}, "No bake is running; Bake is available again")
+            return {'FINISHED'}
+        _QUEUE["cancel_requested"] = True
+        self.report(
+            {'WARNING'},
+            "Cancelling after the current Cycles pass; press Esc to stop it now",
+        )
+        return {'FINISHED'}
+
+
 class PMVR_OT_BakeQueue(bpy.types.Operator):
     bl_idname = "pmvr.bake_queue"
     bl_label = "Bake Queue"
@@ -1335,7 +1687,9 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         if not states:
             self.report({'ERROR'}, "Choose Day, Evening, or both")
             return {'CANCELLED'}
+        _ensure_object_mode(context)
         self._viewport_shading = _switch_viewports_to_wireframe(context)
+        _QUEUE["cancel_requested"] = False
         log.info(
             "Bake",
             f"Queue start: {len(project.bake_queue)} unit(s), "
@@ -1358,16 +1712,25 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         self._job_seen_running = False
         self._job_started_at = 0.0
         self._cancel_requested = False
-        self._succeeded = self._skipped = self._failed = 0
+        self._cancel_reason = ""
+        self._discarded_unit = ""
+        self._succeeded = self._skipped = self._failed = self._warned = 0
+        self._timer = None
         self._feedback = BakeProgressFeedback(
             context,
             title="PM VR BEAUTY BAKER",
         )
         self._pmvr_feedback = self._feedback
         project.operation_running = True
+        _QUEUE["running"] = True
+        _install_bake_job_handlers()
         try:
             self._feedback.start(len(self._jobs))
             self._feedback.set_candidate_count(len(self._jobs))
+            self._feedback.add_message(
+                'INFO',
+                "Esc cancels the whole queue; finished units are kept",
+            )
             context.window_manager.progress_begin(0, len(self._jobs))
             self._timer = context.window_manager.event_timer_add(
                 0.2,
@@ -1380,18 +1743,48 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         except Exception as exc:
             self._failed += 1
-            print(f"[PM VR][Beauty] Could not start modal bake: {exc}")
+            log.error("Beauty", f"Could not start modal bake: {exc}")
+            if self._current_runtime:
+                self._current_runtime.fail(exc)
+                self._current_runtime = None
             return self._finish_modal(context, cancelled=True)
 
-    def modal(self, context, event):
-        if event.type == 'ESC':
+    def _request_cancel(self, reason):
+        if not self._cancel_requested:
             self._cancel_requested = True
+            self._cancel_reason = reason
+            log.warning("Bake", f"Cancel requested: {reason}")
+            self._feedback.add_message('WARNING', f"Cancelling: {reason}")
+
+    def modal(self, context, event):
+        try:
+            return self._modal(context, event)
+        except Exception as exc:
+            # Never leave the scene isolated or the Bake button disabled after
+            # an unexpected error inside an unattended queue.
+            log.error("Bake", f"Unexpected queue error: {exc}")
+            if self._current_runtime:
+                self._failed += 1
+                try:
+                    self._current_runtime.fail(exc)
+                except Exception as cleanup_exc:
+                    log.error("Bake", f"Cleanup after queue error failed: {cleanup_exc}")
+                self._current_runtime = None
+            return self._finish_modal(context, cancelled=True)
+
+    def _modal(self, context, event):
+        if event.type == 'ESC' and event.value == 'PRESS':
+            self._request_cancel("Esc pressed")
             if not self._waiting_for_bake:
                 return self._finish_modal(context, cancelled=True)
             return {'PASS_THROUGH'}
         if event.type != 'TIMER':
             return {'PASS_THROUGH'}
+        if _QUEUE["cancel_requested"]:
+            self._request_cancel("Cancel button")
         if not self._waiting_for_bake:
+            if self._cancel_requested:
+                return self._finish_modal(context, cancelled=True)
             return {'PASS_THROUGH'}
 
         running = bpy.app.is_job_running('OBJECT_BAKE')
@@ -1400,19 +1793,25 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             return {'PASS_THROUGH'}
         if (
             not self._job_seen_running
+            and not _BAKE_JOB["completed"]
+            and not _BAKE_JOB["cancelled"]
             and time.monotonic() - self._job_started_at < 1.0
         ):
             return {'PASS_THROUGH'}
 
         self._waiting_for_bake = False
+        if _BAKE_JOB["cancelled"]:
+            # Esc in the Cycles job or its status-bar cancel button. The
+            # interrupted member left a partial atlas: discard the whole unit.
+            self._request_cancel("Cycles bake was cancelled")
         runtime = self._current_runtime
-        if runtime:
+        if runtime and not self._cancel_requested:
             receiver = runtime.receivers[self._receiver_index]
             log.info(
                 "Beauty",
                 f'Baked {self._receiver_index + 1}/{len(runtime.receivers)} '
                 f'"{receiver["source"].name}" in unit '
-                f'"{runtime.unit.display_name}"',
+                f'"{runtime._label() or runtime.unit_id}"',
             )
         if self._cancel_requested:
             return self._finish_modal(context, cancelled=True)
@@ -1423,10 +1822,6 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             except Exception as exc:
                 self._failed += 1
                 self._current_runtime.fail(exc)
-                print(
-                    f'[PM VR][Beauty] Failed to start receiver in '
-                    f'"{self._current_runtime.unit.display_name}": {exc}'
-                )
                 self._feedback.complete_object()
                 self._current_runtime = None
                 result = self._start_next_job(context)
@@ -1434,13 +1829,11 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         try:
             self._current_runtime.finish()
             self._succeeded += 1
+            if self._current_runtime.warnings:
+                self._warned += 1
         except Exception as exc:
             self._failed += 1
             self._current_runtime.fail(exc)
-            print(
-                f'[PM VR][Beauty] Failed '
-                f'"{self._current_runtime.unit.display_name}": {exc}'
-            )
         finally:
             self._feedback.complete_object()
             self._current_runtime = None
@@ -1449,6 +1842,9 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
 
     def _start_next_job(self, context):
         while self._job_cursor < len(self._jobs):
+            if self._cancel_requested or _QUEUE["cancel_requested"]:
+                self._request_cancel(self._cancel_reason or "Cancel button")
+                return self._finish_modal(context, cancelled=True)
             state, unit_id = self._jobs[self._job_cursor]
             self._job_cursor += 1
             self._project.operation_progress = (
@@ -1486,66 +1882,93 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 if self._current_runtime:
                     self._current_runtime.fail(exc)
                     self._current_runtime = None
-                print(
-                    f'[PM VR][Beauty][{state}] Failed '
-                    f'"{unit.display_name}": {exc}'
-                )
+                else:
+                    log.error(
+                        "Beauty",
+                        f'Failed {state.title()} unit "{unit.display_name}": {exc}',
+                    )
                 self._feedback.complete_object()
         return self._finish_modal(context, cancelled=False)
 
     def _start_receiver(self, _context):
         runtime = self._current_runtime
         runtime.select_receiver(self._receiver_index)
+        _reset_bake_job_flags()
         result = bpy.ops.object.bake(
             'INVOKE_DEFAULT',
             **runtime.bake_kwargs(),
         )
         if 'CANCELLED' in result:
-            exc = PipelineBakeCancelled("Cycles bake was cancelled")
-            runtime.fail(exc)
-            self._current_runtime = None
-            self._failed += 1
+            self._request_cancel("Cycles bake could not start")
             return self._finish_modal(runtime.context, cancelled=True)
         self._waiting_for_bake = True
         self._job_seen_running = bpy.app.is_job_running('OBJECT_BAKE')
         self._job_started_at = time.monotonic()
         return {'RUNNING_MODAL'}
 
+    def cancel(self, context):
+        # Blender cancels modal operators when a file is loaded or the window
+        # closes. Old datablock references may already be invalid.
+        try:
+            if self._current_runtime:
+                self._current_runtime.cleanup(keep_image=False)
+        except Exception:
+            pass
+        self._current_runtime = None
+        try:
+            if self._timer:
+                context.window_manager.event_timer_remove(self._timer)
+        except Exception:
+            pass
+        self._timer = None
+        _remove_bake_job_handlers()
+        _QUEUE["running"] = False
+        _QUEUE["cancel_requested"] = False
+        try:
+            self._project.operation_running = False
+        except Exception:
+            pass
+
     def _finish_modal(self, context, cancelled):
         if self._current_runtime:
-            self._current_runtime.cleanup(keep_image=False)
+            self._discarded_unit = self._current_runtime._label() or "removed unit"
+            self._current_runtime.cancel(self._cancel_reason or "queue stopped")
             self._current_runtime = None
         timer = getattr(self, "_timer", None)
         if timer:
             context.window_manager.event_timer_remove(timer)
             self._timer = None
+        _remove_bake_job_handlers()
+        _QUEUE["running"] = False
+        _QUEUE["cancel_requested"] = False
         context.window_manager.progress_end()
         self._project.operation_running = False
         self._project.operation_progress = 1.0
         try:
             activate_state(context, self._original_state)
         except Exception as exc:
-            print(
-                f"[PM VR][Bake] Could not restore "
-                f"{self._original_state}: {exc}"
-            )
+            log.warning("Bake", f"Could not restore {self._original_state}: {exc}")
         _restore_viewport_shading(self._viewport_shading)
         state_label = " + ".join(state.title() for state in self._states)
         summary = (
             f"Beauty ({state_label}): {self._succeeded} ready, "
             f"{self._skipped} skipped, {self._failed} failed"
         )
+        if self._warned:
+            summary += f", {self._warned} with warnings"
         if cancelled:
             summary += ", cancelled"
+            if self._discarded_unit:
+                summary += f' ("{self._discarded_unit}" discarded)'
         self._project.last_operation_summary = summary
         log.info("Bake", summary)
         self._feedback.finish(
             summary,
-            has_errors=bool(self._failed or cancelled),
+            has_errors=bool(self._failed or cancelled or self._warned),
         )
         self.report(
-            {'WARNING'} if self._failed or cancelled else {'INFO'},
-            summary,
+            {'WARNING'} if self._failed or cancelled or self._warned else {'INFO'},
+            summary + ("; see the PMVR Pipeline Log text" if self._failed or self._warned else ""),
         )
         return (
             {'FINISHED'}
@@ -1561,6 +1984,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         feedback = BakeProgressFeedback(context)
         project.operation_running = True
         succeeded = skipped = failed = 0
+        cancelled = False
         try:
             feedback.start(total_jobs)
             feedback.set_candidate_count(total_jobs)
@@ -1568,6 +1992,8 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             context.window_manager.progress_begin(0, total_jobs)
             job_index = 0
             for state in states:
+                if cancelled:
+                    break
                 activate_state(context, state)
                 for unit_id in entries:
                     job_index += 1
@@ -1590,11 +2016,15 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                             skipped += 1
                         else:
                             succeeded += 1
+                    except PipelineBakeCancelled as exc:
+                        cancelled = True
+                        log.warning("Lightmap", f'Cancelled in "{unit.display_name}": {exc}')
+                        break
                     except Exception as exc:
                         failed += 1
-                        print(
-                            f'[PM VR][Lightmap][{state}] Failed '
-                            f'"{unit.display_name}": {exc}'
+                        log.error(
+                            "Lightmap",
+                            f'[{state}] Failed "{unit.display_name}": {exc}',
                         )
                     finally:
                         feedback.complete_object()
@@ -1605,17 +2035,19 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             try:
                 activate_state(context, original_state)
             except Exception as exc:
-                print(f"[PM VR][Bake] Restore warning: {exc}")
+                log.warning("Bake", f"Restore warning: {exc}")
         state_label = " + ".join(state.title() for state in states)
         summary = (
             f"Lightmap ({state_label}): {succeeded} ready, "
             f"{skipped} skipped, {failed} failed"
         )
+        if cancelled:
+            summary += ", cancelled"
         project.last_operation_summary = summary
         log.info("Bake", summary)
-        feedback.finish(summary, has_errors=bool(failed))
-        self.report({'WARNING'} if failed else {'INFO'}, summary)
-        return {'FINISHED'} if succeeded or skipped else {'CANCELLED'}
+        feedback.finish(summary, has_errors=bool(failed or cancelled))
+        self.report({'WARNING'} if failed or cancelled else {'INFO'}, summary)
+        return {'FINISHED'} if (succeeded or skipped) and not cancelled else {'CANCELLED'}
 
 
-CLASSES = (PMVR_OT_BakeQueue,)
+CLASSES = (PMVR_OT_BakeQueue, PMVR_OT_CancelBakeQueue)
