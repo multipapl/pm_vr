@@ -7,14 +7,15 @@ import uuid
 import bpy
 
 from .. import collection_export
-from .bake import (
-    PipelineBakeError,
+from .bake_scene import PipelineBakeError
+from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
+from .generated import (
     bind_generated_state,
     restore_generated_bindings,
     snapshot_generated_bindings,
 )
-from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem
+from . import log
 from .state import activate_state
 from .validation import object_render_visible
 
@@ -162,6 +163,7 @@ def export_semantic_layer(context, layer, format_name):
         if 'FINISHED' not in result or not os.path.exists(temporary_path):
             raise PipelineExportError(f"Blender did not produce {format_name}")
         os.replace(temporary_path, final_path)
+        log.info("Export", f"{layer.display_name} ({format_name}): {len(objects)} object(s) -> {final_path}")
         return "SUCCESS", final_path
     finally:
         _remove_assembly(context.scene, assembly)
@@ -215,6 +217,11 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         succeeded = skipped = failed = 0
         first_error = ""
         cancelled = False
+        log.info(
+            "Export",
+            f"Start: {len(jobs)} file(s), {project.active_lighting_state.title()}, "
+            f"{bpy.data.filepath or 'unsaved file'}",
+        )
         project.operation_running = True
         try:
             context.window_manager.progress_begin(0, len(jobs))
@@ -225,18 +232,22 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
                     status, message = export_semantic_layer(context, layer, format_name)
                     if status == 'SKIPPED':
                         skipped += 1
-                        print(f'[PM VR][Export] Skipped "{layer.display_name}": {message}')
+                        log.info("Export", f'Skipped "{layer.display_name}" ({format_name}): {message}')
                     else:
                         succeeded += 1
-                        print(f'[PM VR][Export] {layer.display_name} -> {message}')
                 except PipelineExportCancelled:
                     cancelled = True
+                    log.warning("Export", f'Cancelled at "{layer.display_name}" ({format_name})')
                     break
                 except Exception as exc:
                     failed += 1
                     if not first_error:
                         first_error = f'{layer.display_name} ({format_name}): {exc}'
-                    print(f'[PM VR][Export] Failed "{layer.display_name}" ({format_name}): {exc}')
+                    log.error(
+                        "Export",
+                        f'Failed "{layer.display_name}" ({format_name}): {exc}',
+                        with_traceback=not isinstance(exc, PipelineExportError),
+                    )
             project.operation_progress = 1.0
         finally:
             context.window_manager.progress_end()
@@ -245,6 +256,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         if cancelled:
             summary += ", cancelled"
         project.last_operation_summary = summary
+        log.info("Export", summary)
         self.report(
             {'WARNING'} if failed or cancelled else {'INFO'},
             summary + (f"; {first_error}" if first_error else ""),

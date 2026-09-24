@@ -5,8 +5,12 @@ from bpy.app.handlers import persistent
 
 from . import (
     bake,
+    bake_scene,
     data,
     export,
+    generated,
+    identity,
+    log,
     scene_debug,
     selection_sync,
     setup_ops,
@@ -19,7 +23,43 @@ from . import (
 def _load_post(_filepath):
     # Files saved by earlier versions may hold generated state materials
     # without a fake user; protect them before the next save drops them.
-    bake.protect_all_generated_materials()
+    generated.protect_all_generated_materials()
+    restored = bake_scene.recover_interrupted_bake()
+    if restored:
+        log.warning(
+            "Bake",
+            f"Restored {restored} item(s) left by an interrupted bake "
+            "(render visibility, generated collection, work data)",
+        )
+    identity.remember_identity_owners()
+
+
+def _separate_copies(force):
+    try:
+        separated = identity.separate_copied_identities(force=force)
+    except (AttributeError, ReferenceError, RuntimeError):
+        return
+    if separated:
+        log.info("Setup", f"Gave {separated} copied object(s) their own pipeline identity")
+
+
+@persistent
+def _depsgraph_update_post(_scene, _depsgraph):
+    _separate_copies(force=False)
+
+
+@persistent
+def _undo_redo_post(*_args):
+    # Undo can bring back a copy that still carries the original's ID.
+    _separate_copies(force=True)
+
+
+_HANDLERS = (
+    ("load_post", _load_post),
+    ("depsgraph_update_post", _depsgraph_update_post),
+    ("undo_post", _undo_redo_post),
+    ("redo_post", _undo_redo_post),
+)
 
 
 def register():
@@ -29,10 +69,13 @@ def register():
     selection_sync.register()
     viewport_overlay.register()
     scene_debug.register()
-    if _load_post not in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.append(_load_post)
+    for handler_name, handler in _HANDLERS:
+        handlers = getattr(bpy.app.handlers, handler_name)
+        if handler not in handlers:
+            handlers.append(handler)
     try:
-        bake.protect_all_generated_materials()
+        identity.remember_identity_owners()
+        generated.protect_all_generated_materials()
     except AttributeError:
         # bpy.data is restricted while add-ons register at startup; the
         # load_post handler covers the file that is opened next.
@@ -40,8 +83,10 @@ def register():
 
 
 def unregister():
-    if _load_post in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(_load_post)
+    for handler_name, handler in _HANDLERS:
+        handlers = getattr(bpy.app.handlers, handler_name)
+        if handler in handlers:
+            handlers.remove(handler)
     bake.shutdown()
     scene_debug.unregister()
     viewport_overlay.unregister()

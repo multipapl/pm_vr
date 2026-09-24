@@ -4,21 +4,12 @@ import bpy
 from bpy.app.handlers import persistent
 
 from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_SOURCE_ID, TAG_UNIT_ID
+from .identity import sources_by_id
 
 
 _MSGBUS_OWNER = object()
 _timer_pending = False
 _applying = False
-
-
-def _source_from_id(source_id):
-    if not source_id:
-        return None
-    for obj in bpy.data.objects:
-        metadata = getattr(obj, "pm_vr_pipeline", None)
-        if metadata and metadata.source_id == source_id:
-            return obj
-    return None
 
 
 def _ownership_for_object(project, obj):
@@ -35,7 +26,7 @@ def _ownership_for_object(project, obj):
             )
             layer_id = unit.render_layer_id if unit else ""
         if not layer_id:
-            source = _source_from_id(obj.get(TAG_SOURCE_ID, ""))
+            source = sources_by_id().get(obj.get(TAG_SOURCE_ID, ""))
             if source:
                 metadata = source.pm_vr_pipeline
                 layer_id = metadata.render_layer_id

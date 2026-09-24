@@ -64,6 +64,7 @@ class PMVR_PT_MainPanel(bpy.types.Panel):
         ui_state = context.scene.pm_vr_ui_state
         header = layout.row(align=True)
         header.prop(ui_state, "stage", expand=True)
+        header.operator("pmvr.show_help", text="", icon='QUESTION')
         header.operator("pmvr.project_settings", text="", icon='PREFERENCES')
 
         if ui_state.stage == 'OPTIMIZATION':

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import bpy
 
+from .bake_scene import principled_nodes
 from .constants import BAKE_LAYER_TYPES, BAKE_UV_NAME, PRIMARY_UV_NAME
 from .identity import duplicate_source_ids, find_layer, find_unit, layer_members, unit_members
 from .state import PipelineStateError, validate_state_configuration
@@ -38,7 +39,11 @@ def validate_project(context, include_state=True):
             issues.append(Issue('ERROR', str(exc)))
     for source_id, objects in duplicate_source_ids().items():
         names = ", ".join(obj.name for obj in objects)
-        issues.append(Issue('ERROR', f"Duplicate source ID {source_id[:8]}: {names}"))
+        issues.append(Issue(
+            'ERROR',
+            f"Duplicate source ID {source_id[:8]}: {names}; select the copy and run "
+            "F3 > Register Selected Duplicates as New Sources",
+        ))
     layer_ids = [layer.layer_id for layer in project.render_layers if layer.layer_id]
     if len(layer_ids) != len(set(layer_ids)):
         issues.append(Issue('ERROR', "Render layers contain duplicate stable IDs"))
@@ -62,6 +67,17 @@ def validate_unit(context, unit, require_visible=True):
         return issues
     visible_count = 0
     duplicate_ids = duplicate_source_ids()
+    mesh_owners = {}
+    for obj in members:
+        if obj.type == 'MESH' and obj.data:
+            other = mesh_owners.setdefault(obj.data.as_pointer(), obj)
+            if other is not obj:
+                issues.append(Issue(
+                    'ERROR',
+                    f'Shares mesh data with "{other.name}" in this unit; their '
+                    f'SimpleBake UVs overlap. Put linked duplicates in separate units',
+                    obj.name,
+                ))
     for obj in members:
         if obj.type != 'MESH':
             issues.append(Issue('ERROR', "Bake role requires a Mesh", obj.name))
@@ -83,11 +99,7 @@ def validate_unit(context, unit, require_visible=True):
         if layer.layer_type in {'PBR', 'ALPHA'}:
             for slot_index, slot in enumerate(obj.material_slots):
                 material = slot.material
-                principled = (
-                    [node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED']
-                    if material and material.use_nodes and material.node_tree
-                    else []
-                )
+                principled = principled_nodes(material)
                 if len(principled) != 1:
                     issues.append(Issue(
                         'ERROR',

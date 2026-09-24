@@ -1,12 +1,12 @@
 """Setup, identity, queue, state, validation and preview operators."""
 
 import math
+import os
 
 import bpy
 
 from ..scene_diagnostics import get_target_td, measure_texel_areas
 from .constants import (
-    GENERATED_COLLECTION,
     LAYER_COLOR_PALETTE,
     RESOLUTION_ITEMS,
     ROLE_ITEMS,
@@ -16,6 +16,11 @@ from .constants import (
     TAG_MODE,
     TAG_SOURCE_ID,
     TAG_UNIT_ID,
+)
+from .generated import (
+    bind_generated_state,
+    release_generated_material,
+    remove_generated_object,
 )
 from .identity import (
     duplicate_source_ids,
@@ -27,6 +32,7 @@ from .identity import (
     layer_members,
     new_id,
     safe_stem,
+    sources_by_id,
     unit_members,
 )
 from .state import PipelineStateError, activate_state
@@ -99,18 +105,12 @@ def _remove_extra_export_layer(metadata, layer_id):
 
 def selected_source_objects(context):
     """Accept source or generated selections for export-only membership edits."""
-    sources_by_id = {
-        obj.pm_vr_pipeline.source_id: obj
-        for obj in bpy.data.objects
-        if hasattr(obj, "pm_vr_pipeline")
-        and obj.pm_vr_pipeline.is_registered_source
-        and obj.pm_vr_pipeline.source_id
-    }
+    source_index = sources_by_id()
     sources = []
     seen = set()
     for selected in context.selected_objects:
         source = (
-            sources_by_id.get(selected.get(TAG_SOURCE_ID, ""))
+            source_index.get(selected.get(TAG_SOURCE_ID, ""))
             if selected.get(TAG_GENERATED)
             else selected
         )
@@ -123,6 +123,12 @@ def selected_source_objects(context):
             sources.append(source)
             seen.add(source.as_pointer())
     return sources
+
+
+def _report_change(operator, message):
+    """Report a Setup change and keep a trail of it in the pipeline log."""
+    operator.report({'INFO'}, message)
+    log.info("Setup", message)
 
 
 def structure_editable(context):
@@ -171,7 +177,7 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
             ):
                 add_layer(project, name, layer_type)
             project.active_render_layer_index = 0
-        self.report({'INFO'}, "PM VR pipeline project initialized")
+        _report_change(self, "PM VR pipeline project initialized")
         return {'FINISHED'}
 
 
@@ -247,7 +253,7 @@ class PMVR_OT_AssignSelectedToLayer(bpy.types.Operator):
             if metadata.processing_role != 'BAKE':
                 metadata.bake_unit_id = ""
             assigned += 1
-        self.report({'INFO'}, f"Assigned {assigned} source object(s) to {layer.display_name}")
+        _report_change(self, f"Assigned {assigned} source object(s) to {layer.display_name}")
         return {'FINISHED'}
 
 
@@ -270,7 +276,7 @@ class PMVR_OT_UnassignSelected(bpy.types.Operator):
             meta.extra_export_layers.clear()
             count += 1
         suffix = f"; cleared {cleared_exports} additional export assignment(s)" if cleared_exports else ""
-        self.report({'INFO'}, f"Unassigned {count} object(s){suffix}")
+        _report_change(self, f"Unassigned {count} object(s){suffix}")
         return {'FINISHED'}
 
 
@@ -341,7 +347,7 @@ class PMVR_OT_EditExtraExports(bpy.types.Operator):
         verb = "Included" if self.action == 'ADD' else "Removed"
         suffix = "; " + ", ".join(f"{count} {reason}" for reason, count in skipped.items()) if skipped else ""
         preposition = "in" if self.action == 'ADD' else "from"
-        self.report({'INFO'}, f"{verb} {changed} source(s) {preposition} {target.display_name}{suffix}")
+        _report_change(self, f"{verb} {changed} source(s) {preposition} {target.display_name}{suffix}")
         return {'FINISHED'}
 
 
@@ -403,7 +409,7 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
             project.active_bake_unit_index = len(project.bake_units) - 1
         mode = "one shared unit" if self.merge_selected else f"{len(groups)} separate unit(s)"
         suffix = f"; skipped {already_assigned} already assigned" if already_assigned else ""
-        self.report({'INFO'}, f"Created {mode}{suffix}")
+        _report_change(self, f"Created {mode}{suffix}")
         return {'FINISHED'}
 
 
@@ -511,7 +517,7 @@ class PMVR_OT_AssignSelectedToUnit(bpy.types.Operator):
             meta.processing_role = 'BAKE'
             meta.bake_unit_id = unit.unit_id
             count += 1
-        self.report({'INFO'}, f"Added {count} object(s) to {unit.display_name}")
+        _report_change(self, f"Added {count} object(s) to {unit.display_name}")
         return {'FINISHED'}
 
 
@@ -531,8 +537,6 @@ class PMVR_OT_RemoveBakeUnit(bpy.types.Operator):
             obj for obj in bpy.data.objects
             if obj.get(TAG_GENERATED) and obj.get(TAG_UNIT_ID) == unit.unit_id
         ]
-        from .bake import release_generated_material, remove_generated_object
-
         for generated in generated_objects:
             remove_generated_object(generated)
 
@@ -558,6 +562,10 @@ class PMVR_OT_RemoveBakeUnit(bpy.types.Operator):
         for index in reversed(range(len(project.build_records))):
             if project.build_records[index].unit_id == unit.unit_id:
                 project.build_records.remove(index)
+        _report_change(
+            self,
+            f'Removed unit "{unit.display_name}" and {len(generated_objects)} generated object(s)',
+        )
         index = project.active_bake_unit_index
         project.bake_units.remove(index)
         project.active_bake_unit_index = min(index, max(0, len(project.bake_units) - 1))
@@ -581,21 +589,17 @@ class PMVR_OT_RemoveSelectedFromUnit(bpy.types.Operator):
                 meta.bake_unit_id = ""
                 meta.processing_role = 'UNASSIGNED'
                 count += 1
-        self.report({'INFO'}, f"Removed {count} object(s) from {unit.display_name}")
+        _report_change(self, f"Removed {count} object(s) from {unit.display_name}")
         return {'FINISHED'} if count else {'CANCELLED'}
 
 
 def selected_unit_ids(context):
-    source_by_id = {
-        obj.pm_vr_pipeline.source_id: obj
-        for obj in bpy.data.objects
-        if hasattr(obj, "pm_vr_pipeline") and obj.pm_vr_pipeline.source_id
-    }
+    source_index = sources_by_id()
     unit_ids = []
     for selected in context.selected_objects:
         obj = selected
         if selected.get(TAG_GENERATED):
-            obj = source_by_id.get(selected.get(TAG_SOURCE_ID, ""))
+            obj = source_index.get(selected.get(TAG_SOURCE_ID, ""))
         if not obj or not hasattr(obj, "pm_vr_pipeline"):
             continue
         unit_id = obj.pm_vr_pipeline.bake_unit_id
@@ -711,10 +715,11 @@ class PMVR_OT_ValidatePipeline(bpy.types.Operator):
         warnings = sum(issue.severity == 'WARNING' for issue in issues)
         summary = "Pipeline valid" if not issues else f"{errors} error(s), {warnings} warning(s), {len(issues) - errors - warnings} info"
         context.scene.pm_vr_project.last_validation_summary = summary
+        log.info("Validation", summary)
         for issue in issues:
             suffix = f' [{issue.object_name}]' if issue.object_name else ""
-            print(f"[PM VR][Validation][{issue.severity}] {issue.message}{suffix}")
-        self.report({'ERROR'} if errors else {'INFO'}, summary + ("; see console" if issues else ""))
+            log.write("Validation", f"{issue.message}{suffix}", issue.severity)
+        self.report({'ERROR'} if errors else {'INFO'}, summary + ("; see the PMVR Pipeline Log" if issues else ""))
         return {'CANCELLED'} if errors else {'FINISHED'}
 
 
@@ -735,7 +740,7 @@ class PMVR_OT_RegisterDuplicateAsNew(bpy.types.Operator):
                 meta.bake_unit_id = ""
                 meta.extra_export_layers.clear()
                 count += 1
-        self.report({'INFO'}, f"Registered {count} selected object(s) as new sources")
+        _report_change(self, f"Registered {count} selected object(s) as new sources")
         return {'FINISHED'}
 
 
@@ -794,8 +799,6 @@ class PMVR_OT_TogglePreview(bpy.types.Operator):
     bl_description = "Apply source/generated visibility switches without changing authored collection membership"
 
     def execute(self, context):
-        from .bake import bind_generated_state
-
         project = context.scene.pm_vr_project
         for unit in project.bake_units:
             bind_generated_state(unit, project.active_lighting_state, project.bake_mode)
@@ -805,6 +808,18 @@ class PMVR_OT_TogglePreview(bpy.types.Operator):
                 obj.hide_set(not (project.show_generated and show_this_mode))
             elif hasattr(obj, "pm_vr_pipeline") and obj.pm_vr_pipeline.is_registered_source:
                 obj.hide_set(not project.show_sources)
+        return {'FINISHED'}
+
+
+class PMVR_OT_OpenLogFolder(bpy.types.Operator):
+    bl_idname = "pmvr.open_log_folder"
+    bl_label = "Open Log Folder"
+    bl_description = "Open the folder with the PM VR log files for this .blend"
+
+    def execute(self, _context):
+        folder = os.path.dirname(log.log_file_path())
+        os.makedirs(folder, exist_ok=True)
+        bpy.ops.wm.path_open(filepath=folder)
         return {'FINISHED'}
 
 
@@ -836,6 +851,10 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         export.label(text="Export", icon='EXPORT')
         export.prop(project, "usdz_output_directory")
         export.prop(project, "glb_output_directory")
+        log_box = layout.box()
+        log_box.label(text="Log", icon='TEXT')
+        log_box.label(text=log.log_file_path())
+        log_box.operator("pmvr.open_log_folder", icon='FILEBROWSER')
         layout.label(text=f"Schema {project.schema_version}  •  Project {project.project_id[:8] or 'not initialized'}")
 
     def invoke(self, context, _event):
@@ -868,5 +887,6 @@ CLASSES = (
     PMVR_OT_RegisterDuplicateAsNew,
     PMVR_OT_SelectPipelineItems,
     PMVR_OT_TogglePreview,
+    PMVR_OT_OpenLogFolder,
     PMVR_OT_ProjectSettings,
 )

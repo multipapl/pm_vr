@@ -15,6 +15,12 @@ The View3D sidebar is organized as four stages:
 
 Global source-root, lighting collections, worlds, bake defaults, and output
 directories live in **Project Settings** (the gear button in the panel header).
+The `?` button next to it lists the naming and scene rules the pipeline relies on.
+Bake, export, validation and Setup changes are logged to
+`PMVR_Logs/<blend name>_<date>.log` next to the `.blend` (in the system temp
+folder while the file is unsaved). Every line is written immediately, so the log
+survives a crash; Project Settings shows the path and opens the folder. The last
+500 lines are also kept in the **PMVR Pipeline Log** text inside the `.blend`.
 
 ## Production Beauty workflow
 
@@ -49,7 +55,9 @@ to stop the whole queue: the running Cycles pass stops, the unit in progress
 is discarded, and units finished earlier in the queue are kept. Adding or
 removing layers and units is disabled while a bake runs. Day and Evening
 materials are both kept in the `.blend` even though a generated object shows
-one state at a time.
+one state at a time. If a file is saved during a bake, or Blender stops in the
+middle of one, the temporary bake visibility and work data are restored the
+next time the file is opened.
 
 Every semantic layer has one authoritative type: `Unlit`, `PBR`, `Alpha`,
 `Translucent`, `Glass`, `Emissive`, or `Runtime`. The type directly

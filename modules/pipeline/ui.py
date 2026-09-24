@@ -233,4 +233,71 @@ def draw_export(layout, context):
         layout.label(text=project.last_operation_summary, icon='INFO')
 
 
-CLASSES = (PMVR_UL_RenderLayers, PMVR_UL_BakeUnits, PMVR_UL_BakeQueue)
+HELP_SECTIONS = (
+    ("Names", 'SORTALPHA', (
+        "Object, mesh and material names are free: any characters,",
+        "any language. Identity uses stable IDs, so renaming after",
+        "a bake is safe and does not create duplicates.",
+        "Required: the first UV channel is named UVMap and the",
+        "second SimpleBake (Optimize > Fix UV Channels).",
+        "A render layer name is its export file name:",
+        "Name.usdz for Day, Name_Evening.usdz for Evening.",
+        "Layer names must differ (ignoring upper/lower case).",
+        "Unit names go into Beauty PNG names. Names that clash",
+        "(case or special characters) get a short ID suffix.",
+        "Generated objects are named after their source (Name.001);",
+        "exported object names follow the generated object.",
+    )),
+    ("Scene", 'OUTLINER_COLLECTION', (
+        "Assigned objects must be inside Source Root.",
+        "Keep your own objects out of PMVR_GENERATED and PMVR_WORK;",
+        "PM VR manages those collections.",
+        "Shift+D, Alt+D and copy/paste give the copy its own ID. A copy",
+        "of a baked object stays in its layer but needs its own unit;",
+        "a copy of a generated object becomes an ordinary object.",
+        "Linked duplicates (Alt+D) bake fine in separate units, each with",
+        "its own texture; they cannot share one unit (their UVs overlap).",
+        "Materials linked to the object instead of the mesh are respected.",
+    )),
+    ("Bake", 'RENDER_STILL', (
+        "Save the .blend first when output folders are relative (//).",
+        "Every member of a unit must be visible, or all hidden, in the",
+        "active Day/Evening state; partly visible units are refused.",
+        "PBR and Alpha: each material slot needs exactly one Principled",
+        "BSDF, and modifiers must not add or remove material slots.",
+        "Esc or Cancel Bake stops the whole queue; the unit in progress",
+        "is discarded and finished units are kept.",
+        "Adding or removing layers and units is locked during a bake.",
+    )),
+    ("Export", 'EXPORT', (
+        "Every baked unit in the layer needs a Ready Beauty result for",
+        "the active state, with matching Day/Evening structure.",
+        "Additional exports only work between layers of the same type.",
+        "Export never uses the current selection.",
+    )),
+)
+
+
+class PMVR_OT_ShowHelp(bpy.types.Operator):
+    bl_idname = "pmvr.show_help"
+    bl_label = "PM VR Rules"
+    bl_description = "Naming and scene rules the pipeline relies on"
+
+    def draw(self, _context):
+        layout = self.layout
+        for title, icon, lines in HELP_SECTIONS:
+            box = layout.box()
+            box.label(text=title, icon=icon)
+            column = box.column(align=True)
+            column.scale_y = 0.8
+            for line in lines:
+                column.label(text=line)
+
+    def invoke(self, context, _event):
+        return context.window_manager.invoke_popup(self, width=440)
+
+    def execute(self, _context):
+        return {'FINISHED'}
+
+
+CLASSES = (PMVR_UL_RenderLayers, PMVR_UL_BakeUnits, PMVR_UL_BakeQueue, PMVR_OT_ShowHelp)
