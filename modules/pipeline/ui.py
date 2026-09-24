@@ -235,45 +235,44 @@ def draw_export(layout, context):
 
 HELP_SECTIONS = (
     ("Names", 'SORTALPHA', (
-        "Object, mesh and material names are free: any characters,",
-        "any language. Identity uses stable IDs, so renaming after",
-        "a bake is safe and does not create duplicates.",
-        "Required: the first UV channel is named UVMap and the",
-        "second SimpleBake (Optimize > Fix UV Channels).",
-        "A render layer name is its export file name:",
-        "Name.usdz for Day, Name_Evening.usdz for Evening.",
-        "Layer names must differ (ignoring upper/lower case).",
-        "Unit names go into Beauty PNG names. Names that clash",
-        "(case or special characters) get a short ID suffix.",
-        "Generated objects are named after their source (Name.001);",
-        "exported object names follow the generated object.",
+        "Object, mesh, material names: anything (identity uses IDs)",
+        "Renaming after a bake is safe",
+        "UV channels: 1st UVMap, 2nd SimpleBake",
+        "Layer name = export file: Name.usdz, Name_Evening.usdz",
+        "Layer names must differ (case-insensitive)",
+        "Unit name = Beauty PNG name; clashes get an ID suffix",
+        "Generated object = source name + .001, used in export",
+    )),
+    ("Texel density", 'UV', (
+        "Target: ~10 px/cm (objects seen up close)",
+        "Walls, floors, ceilings: 5 acceptable, 7 very good",
+        "Large ceilings: ~4 px/cm is normal",
+        "~20 px/cm: too much, merge into a shared unit",
+        "Far below target: too low",
+        "Target TD (Project Settings) drives Scene Debug colours",
     )),
     ("Scene", 'OUTLINER_COLLECTION', (
-        "Assigned objects must be inside Source Root.",
-        "Keep your own objects out of PMVR_GENERATED and PMVR_WORK;",
-        "PM VR manages those collections.",
-        "Shift+D, Alt+D and copy/paste give the copy its own ID. A copy",
-        "of a baked object stays in its layer but needs its own unit;",
-        "a copy of a generated object becomes an ordinary object.",
-        "Linked duplicates (Alt+D) bake fine in separate units, each with",
-        "its own texture; they cannot share one unit (their UVs overlap).",
-        "Materials linked to the object instead of the mesh are respected.",
+        "Assigned objects: inside Source Root",
+        "PMVR_GENERATED, PMVR_WORK: managed by PM VR, keep yours out",
+        "Shift+D, Alt+D, copy/paste: the copy gets its own ID",
+        "Copy of a baked object: same layer, needs its own unit",
+        "Copy of a generated object: becomes an ordinary object",
+        "Linked duplicates: separate units only (shared UVs)",
+        "Object-linked materials: supported",
     )),
     ("Bake", 'RENDER_STILL', (
-        "Save the .blend first when output folders are relative (//).",
-        "Every member of a unit must be visible, or all hidden, in the",
-        "active Day/Evening state; partly visible units are refused.",
-        "PBR and Alpha: each material slot needs exactly one Principled",
-        "BSDF, and modifiers must not add or remove material slots.",
-        "Esc or Cancel Bake stops the whole queue; the unit in progress",
-        "is discarded and finished units are kept.",
-        "Adding or removing layers and units is locked during a bake.",
+        "Relative output folders (//): save the .blend first",
+        "Unit members: all visible or all hidden in the state",
+        "PBR, Alpha: one Principled BSDF per material slot",
+        "Modifiers must not add or remove material slots",
+        "Esc or Cancel Bake: stops the queue, current unit discarded",
+        "Layers and units are locked while baking",
     )),
     ("Export", 'EXPORT', (
-        "Every baked unit in the layer needs a Ready Beauty result for",
-        "the active state, with matching Day/Evening structure.",
-        "Additional exports only work between layers of the same type.",
-        "Export never uses the current selection.",
+        "Every unit needs a Ready Beauty for the active state",
+        "Day and Evening must have matching structure",
+        "Additional exports: same layer type only",
+        "Selection is ignored",
     )),
 )
 
@@ -289,9 +288,8 @@ class PMVR_OT_ShowHelp(bpy.types.Operator):
             box = layout.box()
             box.label(text=title, icon=icon)
             column = box.column(align=True)
-            column.scale_y = 0.8
             for line in lines:
-                column.label(text=line)
+                column.label(text=f"•  {line}")
 
     def invoke(self, context, _event):
         return context.window_manager.invoke_popup(self, width=440)
