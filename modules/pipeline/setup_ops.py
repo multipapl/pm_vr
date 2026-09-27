@@ -234,6 +234,12 @@ class PMVR_OT_AssignSelectedToLayer(bpy.types.Operator):
     role: bpy.props.EnumProperty(name="Role", items=ROLE_ITEMS, default='BAKE')
 
     @classmethod
+    def description(cls, _context, properties):
+        if properties.role == 'EXPORT_ORIGINAL':
+            return "Add the selected objects to the active layer; they export as they are, without baking"
+        return cls.bl_description
+
+    @classmethod
     def poll(cls, context):
         return bool(context.selected_objects and context.scene.pm_vr_project.render_layers)
 
@@ -262,13 +268,24 @@ class PMVR_OT_UnassignSelected(bpy.types.Operator):
     bl_label = "Unassign Selected"
     bl_options = {'REGISTER', 'UNDO'}
 
+    active_layer_only: bpy.props.BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def description(cls, _context, properties):
+        if properties.active_layer_only:
+            return "Remove the selected objects from the active layer"
+        return "Remove the selected objects from their layer and unit"
+
     def execute(self, context):
+        layer = active_layer(context.scene.pm_vr_project) if self.active_layer_only else None
         count = 0
         cleared_exports = 0
         for obj in context.selected_objects:
             if not hasattr(obj, "pm_vr_pipeline"):
                 continue
             meta = obj.pm_vr_pipeline
+            if layer and meta.render_layer_id != layer.layer_id:
+                continue
             meta.render_layer_id = ""
             meta.bake_unit_id = ""
             meta.processing_role = 'UNASSIGNED'
@@ -371,7 +388,11 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
         project = context.scene.pm_vr_project
         layer = active_layer(project)
         if layer.layer_type not in BAKE_LAYER_TYPES:
-            self.report({'ERROR'}, "Export Original layers cannot contain bake units")
+            self.report(
+                {'ERROR'},
+                f'"{layer.display_name}" is not baked and has no units; '
+                "add objects with Add Selected (Export Original)",
+            )
             return {'CANCELLED'}
         members = []
         already_assigned = 0

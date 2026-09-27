@@ -2,7 +2,10 @@
 
 import bpy
 
+from .bake_scene import PipelineBakeError
+from .constants import BAKE_LAYER_TYPES
 from .identity import extra_export_members, find_layer, find_unit, layer_members, unit_members
+from .scenarios import Scope, active_scenario, switched_off_count
 from .setup_ops import active_layer, active_unit
 
 
@@ -48,10 +51,52 @@ class PMVR_UL_BakeUnits(bpy.types.UIList):
 class PMVR_UL_BakeQueue(bpy.types.UIList):
     def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index):
         unit = find_unit(context.scene.pm_vr_project, item.unit_id)
+        if not unit:
+            layout.label(text="Missing unit", icon='ERROR')
+            return
+        split = layout.split(factor=0.35, align=True)
+        split.label(text=unit.display_name)
+        right = split.row(align=True)
+        right.prop(unit, "bake_scenario", text="")
+        resolution = right.row(align=True)
+        resolution.ui_units_x = 1.6
+        size = int(unit.resolution)
+        resolution.label(text=f"{size // 1024}K" if size >= 1024 else str(size))
+
+
+class PMVR_UL_BakeScenarios(bpy.types.UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
         row = layout.row(align=True)
-        row.label(text=unit.display_name if unit else "Missing unit", icon='UV' if unit else 'ERROR')
-        if unit:
-            row.label(text=unit.resolution)
+        row.prop(item, "display_name", text="", emboss=False, icon='OUTLINER_COLLECTION')
+        row.label(text=f"{switched_off_count(item)} off")
+
+
+class PMVR_UL_ScenarioCollections(bpy.types.UIList):
+    """Recorded collections in outliner order; the content of a disabled
+    collection is greyed out because it is disabled with it."""
+
+    def draw_item(self, _context, layout, data, item, _icon, _active_data, _active_propname, index):
+        parent_off = False
+        depth = item.depth
+        items = data.collections
+        for previous in range(index - 1, -1, -1):
+            if depth == 0:
+                break
+            other = items[previous]
+            if other.depth < depth:
+                if not other.include:
+                    parent_off = True
+                    break
+                depth = other.depth
+        row = layout.row(align=True)
+        row.active = not parent_off
+        if item.depth:
+            row.separator(factor=1.5 * item.depth)
+        row.prop(item, "include", text="")
+        if item.collection:
+            row.label(text=item.collection.name, icon='OUTLINER_COLLECTION')
+        else:
+            row.label(text=f"{item.name} (deleted)", icon='ERROR')
 
 
 def draw_setup(layout, context):
@@ -75,42 +120,25 @@ def draw_setup(layout, context):
         detail = layers.column(align=True)
         detail.prop(layer, "display_name")
         detail.prop(layer, "layer_type")
+        if layer.layer_type in BAKE_LAYER_TYPES:
+            detail.prop(layer, "bake_scenario", text="Scenario")
         formats = detail.row(align=True)
         formats.prop(layer, "export_usdz", toggle=True)
         formats.prop(layer, "export_glb", toggle=True)
-        assign = detail.row(align=True)
-        op = assign.operator("pmvr.assign_selected_to_layer", text="Export Original", icon='OBJECT_DATA')
-        op.role = 'EXPORT_ORIGINAL'
-        assign.operator("pmvr.unassign_selected", text="Unassign", icon='X')
+        if layer.layer_type in BAKE_LAYER_TYPES:
+            # Unbaked objects (empties, helpers) that belong to a baked layer.
+            assign = detail.row(align=True)
+            op = assign.operator("pmvr.assign_selected_to_layer", text="Export Original", icon='OBJECT_DATA')
+            op.role = 'EXPORT_ORIGINAL'
+            assign.operator("pmvr.unassign_selected", text="Unassign", icon='X')
         nav = detail.row(align=True)
         op = nav.operator("pmvr.select_pipeline_items", text=f"Select {len(layer_members(layer.layer_id))} Sources")
         op.target = 'LAYER_SOURCES'
 
-    units = layout.box()
-    units.label(text="Bake Units", icon='UV')
-    row = units.row()
-    row.template_list("PMVR_UL_BakeUnits", "", project, "bake_units", project, "active_bake_unit_index", rows=5)
-    controls = row.column(align=True)
-    controls.operator("pmvr.add_bake_unit", text="", icon='ADD')
-    controls.operator("pmvr.remove_bake_unit", text="", icon='REMOVE')
-    controls.separator()
-    controls.operator("pmvr.select_all_units_for_resolution", text="", icon='CHECKBOX_HLT')
-    units.label(text="Drag over checkboxes to build a resolution batch.", icon='INFO')
-    units.label(text="+ creates separate units; Shift-click + creates one shared unit.")
-    unit = active_unit(project)
-    if unit:
-        detail = units.column(align=True)
-        detail.prop(unit, "display_name")
-        detail.label(text=f"Members: {len(unit_members(unit.unit_id))}")
-        status_row = detail.row(align=True)
-        status_row.label(text=f"Beauty D: {unit.day_status or '—'}")
-        status_row.label(text=f"E: {unit.evening_status or '—'}")
-        lightmap_row = detail.row(align=True)
-        lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
-        lightmap_row.label(text=f"E: {unit.evening_lightmap_status or '—'}")
-        row = detail.row(align=True)
-        op = row.operator("pmvr.select_pipeline_items", text="Select Sources")
-        op.target = 'UNIT_SOURCES'
+    if layer and layer.layer_type not in BAKE_LAYER_TYPES:
+        draw_original_objects(layout, layer)
+    else:
+        draw_bake_units(layout, project)
 
     selected = context.active_object
     if selected and hasattr(selected, "pm_vr_pipeline") and selected.pm_vr_pipeline.is_registered_source:
@@ -131,6 +159,121 @@ def draw_setup(layout, context):
         if extra_names:
             selected_box.label(text=f"Also exports to: {', '.join(extra_names)}", icon='EXPORT')
 
+
+def draw_original_objects(layout, layer):
+    """Glass, Emissive and Runtime are not baked and have no units: the same
+    place lists the layer's objects, and + adds the selection as originals."""
+    box = layout.box()
+    box.label(text="Objects", icon='OBJECT_DATA')
+    members = sorted(layer_members(layer.layer_id), key=lambda obj: obj.name.casefold())
+    row = box.row()
+    names = row.box().column(align=True)
+    for obj in members[:8]:
+        names.label(text=obj.name, icon='OBJECT_DATA')
+    if len(members) > 8:
+        names.label(text=f"and {len(members) - 8} more")
+    if not members:
+        names.label(text="No objects yet")
+    controls = row.column(align=True)
+    op = controls.operator("pmvr.assign_selected_to_layer", text="", icon='ADD')
+    op.role = 'EXPORT_ORIGINAL'
+    op = controls.operator("pmvr.unassign_selected", text="", icon='REMOVE')
+    op.active_layer_only = True
+    box.label(text="Not baked: exported as they are.", icon='INFO')
+
+
+def draw_bake_units(layout, project):
+    units = layout.box()
+    units.label(text="Bake Units", icon='UV')
+    row = units.row()
+    row.template_list("PMVR_UL_BakeUnits", "", project, "bake_units", project, "active_bake_unit_index", rows=5)
+    controls = row.column(align=True)
+    controls.operator("pmvr.add_bake_unit", text="", icon='ADD')
+    controls.operator("pmvr.remove_bake_unit", text="", icon='REMOVE')
+    controls.separator()
+    controls.operator("pmvr.select_all_units_for_resolution", text="", icon='CHECKBOX_HLT')
+    units.label(text="Checked units are edited together.", icon='INFO')
+    units.label(text="+ creates separate units; Shift-click + creates one shared unit.")
+    unit = active_unit(project)
+    if unit:
+        detail = units.column(align=True)
+        detail.prop(unit, "display_name")
+        detail.prop(unit, "bake_scenario", text="Scenario")
+        detail.label(text=f"Members: {len(unit_members(unit.unit_id))}")
+        status_row = detail.row(align=True)
+        status_row.label(text=f"Beauty D: {unit.day_status or '—'}")
+        status_row.label(text=f"E: {unit.evening_status or '—'}")
+        lightmap_row = detail.row(align=True)
+        lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
+        lightmap_row.label(text=f"E: {unit.evening_lightmap_status or '—'}")
+        row = detail.row(align=True)
+        op = row.operator("pmvr.select_pipeline_items", text="Select Sources")
+        op.target = 'UNIT_SOURCES'
+
+
+def draw_scenarios(layout, context, project):
+    box = layout.box()
+    header = box.row(align=True)
+    header.prop(
+        project,
+        "show_bake_scenarios",
+        text="Bake Scenarios",
+        icon='TRIA_DOWN' if project.show_bake_scenarios else 'TRIA_RIGHT',
+        emboss=False,
+    )
+    if not project.show_bake_scenarios:
+        header.label(text=f"{len(project.bake_scenarios)}")
+        return
+    body = box.column()
+    # Scenario definitions stay fixed while a queue runs.
+    body.enabled = not project.operation_running
+    row = body.row()
+    row.template_list(
+        "PMVR_UL_BakeScenarios", "", project, "bake_scenarios",
+        project, "active_bake_scenario_index", rows=3,
+    )
+    controls = row.column(align=True)
+    controls.operator("pmvr.add_bake_scenario", text="", icon='ADD')
+    controls.operator("pmvr.remove_bake_scenario", text="", icon='REMOVE')
+    scenario = active_scenario(project)
+    if not scenario:
+        body.label(text="Switch collections in the outliner, then + to save.", icon='INFO')
+        return
+    buttons = body.row(align=True)
+    op = buttons.operator("pmvr.capture_bake_scenario", text="Capture Outliner", icon='IMPORT')
+    op.mode = 'ALL'
+    buttons.operator("pmvr.show_bake_scenario", text="Show in Outliner", icon='HIDE_OFF')
+    try:
+        missing = Scope(project, context.view_layer).unrecorded(scenario)
+    except PipelineBakeError:
+        missing = []
+    if missing:
+        # Unrecorded collections keep their outliner state while baking.
+        warning = body.row(align=True)
+        label = warning.row(align=True)
+        label.alert = True
+        label.label(
+            text=f"{len(missing)} new collection{'s' if len(missing) > 1 else ''}",
+            icon='ERROR',
+        )
+        button = warning.row(align=True)
+        button.ui_units_x = 3.5
+        op = button.operator("pmvr.capture_bake_scenario", text="Add", icon='ADD')
+        op.mode = 'MISSING'
+    body.template_list(
+        "PMVR_UL_ScenarioCollections", "", scenario, "collections",
+        scenario, "active_collection_index", rows=5,
+    )
+    layers = [layer for layer in project.render_layers if layer.layer_type in BAKE_LAYER_TYPES]
+    if layers:
+        defaults = body.column(align=True)
+        defaults.label(text="Layer defaults (units can override):", icon='RENDERLAYERS')
+        for layer in layers:
+            split = defaults.split(factor=0.4, align=True)
+            split.label(text=layer.display_name)
+            split.prop(layer, "bake_scenario", text="")
+
+
 def draw_bake(layout, context):
     project = context.scene.pm_vr_project
     if not project.initialized:
@@ -141,6 +284,7 @@ def draw_bake(layout, context):
     states.prop(project, "bake_day", text="Day", icon='LIGHT_SUN', toggle=True)
     states.prop(project, "bake_evening", text="Evening", icon='LIGHT', toggle=True)
     layout.prop(project, "bake_mode", expand=True)
+    draw_scenarios(layout, context, project)
     queue = layout.box()
     mode_label = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
     queue.label(text=f"{mode_label} Unit Queue", icon='SEQ_STRIP_DUPLICATE')
@@ -253,6 +397,7 @@ HELP_SECTIONS = (
     )),
     ("Scene", 'OUTLINER_COLLECTION', (
         "Assigned objects: inside Source Root",
+        "Glass, Emissive, Runtime: + adds objects unbaked",
         "PMVR_GENERATED, PMVR_WORK: managed by PM VR, keep yours out",
         "Shift+D, Alt+D, copy/paste: the copy gets its own ID",
         "Copy of a baked object: same layer, needs its own unit",
@@ -267,6 +412,17 @@ HELP_SECTIONS = (
         "Modifiers must not add or remove material slots",
         "Esc or Cancel Bake: stops the queue, current unit discarded",
         "Layers and units are locked while baking",
+    )),
+    ("Bake scenarios", 'OUTLINER_COLLECTION', (
+        "Scenario: collections on/off inside Source Root for a bake",
+        "+ saves the outliner as it is; Capture Outliner updates it",
+        "Layer sets the default; a unit can override it",
+        "Checked units change scenario together",
+        "Day/Evening collections follow the lighting state",
+        "Disabling a collection disables everything inside it",
+        "New collections keep their outliner state until added",
+        "Outliner is restored after the queue, cancel or a crash",
+        "A scenario must not disable the unit's own objects",
     )),
     ("Export", 'EXPORT', (
         "Every unit needs a Ready Beauty for the active state",
@@ -298,4 +454,11 @@ class PMVR_OT_ShowHelp(bpy.types.Operator):
         return {'FINISHED'}
 
 
-CLASSES = (PMVR_UL_RenderLayers, PMVR_UL_BakeUnits, PMVR_UL_BakeQueue, PMVR_OT_ShowHelp)
+CLASSES = (
+    PMVR_UL_RenderLayers,
+    PMVR_UL_BakeUnits,
+    PMVR_UL_BakeQueue,
+    PMVR_UL_BakeScenarios,
+    PMVR_UL_ScenarioCollections,
+    PMVR_OT_ShowHelp,
+)

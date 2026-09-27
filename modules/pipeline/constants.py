@@ -30,6 +30,10 @@ RESOLUTION_ITEMS = tuple(
     for value in (256, 512, 1024, 2048, 4096, 8192)
 )
 
+# Bake unit scenario override that bakes with the outliner as it is, even when
+# the unit's layer names a scenario. An empty override follows the layer.
+SCENARIO_NONE = "NONE"
+
 STATE_ITEMS = (
     ('DAY', "Day", "Use Day lighting collection and world"),
     ('EVENING', "Evening", "Use Evening lighting collection and world"),

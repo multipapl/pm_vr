@@ -22,6 +22,14 @@
 - The `?` button in the panel header lists the naming and scene rules (`pipeline/ui.py`, `HELP_SECTIONS`). Keep it in sync when a rule changes.
 - Regression coverage: `tests/blender_pipeline_integrity_smoke.py` (background) and the interactive `tests/blender_gui_bake_cancel.py`, `tests/blender_gui_selection_sync.py` (see their docstrings for the command lines).
 
+## Bake scenarios (2026-09-27)
+
+- `pipeline/scenarios.py`: a scenario records the Exclude flag of every collection under Source Root except the Day/Evening lighting collections, their content and the collections that hold them. Layers name a default (`bake_scenario_id`); units override it (`""` = layer, `SCENARIO_NONE` = outliner as it is). UI: Bake > Bake Scenarios, queue rows, Setup layer/unit detail.
+- Blender does not inherit Exclude in View Layer sync: a child that is not excluded renders inside an excluded parent. Scenarios apply parent-first and exclude the content of an excluded collection; restore also goes parent-first, which keeps the outliner's hidden "previously excluded" memory of children in the normal cases.
+- `ScenarioSession` touches nothing until the first unit with a scenario; its baseline is mirrored as JSON in `scene["pmvr_bake_restore_collections"]` and restored on finish, cancel, operator cancel and on load. Units without a scenario in a mixed queue bake with the baseline.
+- The queue refuses to start (and Validate Pipeline reports) when a scenario would switch off a unit's own members; members hidden by the lighting state, their own render toggle or an unrecorded collection keep the usual skip behavior. Unrecorded collections keep their outliner state and are logged once per queue.
+- Verified: `tests/blender_bake_scenarios_smoke.py` (a counter shadowed by a canopy in Bedroom bakes at 0.007 mean brightness without the Kitchen scenario and 0.658 with it; exact restore; mid-bake save recovery) and `tests/blender_gui_bake_scenarios.py` (real modal queue: refused start, collection states sampled during each Cycles job, restore after finish and after Esc).
+
 ## Audit follow-ups not changed
 
 - Export Original children of a baked parent keep the source parent as a transform-only USD Xform; GLB flattens them to the root. World transforms are correct in both.

@@ -45,6 +45,7 @@ from .generated import (
     tag_image,
 )
 from .identity import find_layer, find_unit, unit_members
+from .scenarios import ScenarioSession, preflight as scenario_preflight
 from . import log, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
@@ -686,6 +687,20 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         if not states:
             self.report({'ERROR'}, "Choose Day, Evening, or both")
             return {'CANCELLED'}
+        # Scenario mistakes are reported before anything starts, not at 3 am.
+        problems = scenario_preflight(
+            context,
+            [entry.unit_id for entry in project.bake_queue],
+            states,
+        )
+        if problems:
+            for problem in problems:
+                log.error("Bake", f"Queue not started: {problem}")
+            more = f" (+{len(problems) - 1} more in the log)" if len(problems) > 1 else ""
+            project.last_operation_summary = f"Bake not started: {problems[0]}{more}"
+            self.report({'ERROR'}, project.last_operation_summary)
+            return {'CANCELLED'}
+        self._scenarios = ScenarioSession(context)
         _ensure_object_mode(context)
         self._viewport_shading = switch_viewports_to_wireframe(context)
         _QUEUE["cancel_requested"] = False
@@ -866,6 +881,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 continue
             try:
                 activate_state(context, state)
+                self._scenarios.apply(context, unit)
                 runtime = BeautyBakeRuntime(context, unit, self)
                 # Own the runtime before preparation starts. Preparation can
                 # fail after it has hidden sources, changed bake settings, or
@@ -925,6 +941,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         except Exception:
             pass
         self._timer = None
+        try:
+            self._scenarios.restore()
+        except Exception:
+            pass
         _remove_bake_job_handlers()
         _QUEUE["running"] = False
         _QUEUE["cancel_requested"] = False
@@ -952,6 +972,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             activate_state(context, self._original_state)
         except Exception as exc:
             log.warning("Bake", f"Could not restore {self._original_state}: {exc}")
+        try:
+            self._scenarios.restore()
+        except Exception as exc:
+            log.error("Bake", f"Could not restore scenario collections: {exc}", with_traceback=True)
         restore_viewport_shading(self._viewport_shading)
         state_label = " + ".join(state.title() for state in self._states)
         summary = (
@@ -1012,6 +1036,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                         continue
                     unit_started = time.monotonic()
                     try:
+                        self._scenarios.apply(context, unit)
                         status, _message = bake_lightmap_unit(
                             context,
                             unit,
@@ -1048,6 +1073,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 activate_state(context, original_state)
             except Exception as exc:
                 log.warning("Bake", f"Restore warning: {exc}")
+            try:
+                self._scenarios.restore()
+            except Exception as exc:
+                log.error("Bake", f"Could not restore scenario collections: {exc}", with_traceback=True)
         state_label = " + ".join(state.title() for state in states)
         summary = (
             f"Lightmap ({state_label}): {succeeded} ready, "

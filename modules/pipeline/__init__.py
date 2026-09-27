@@ -11,6 +11,7 @@ from . import (
     generated,
     identity,
     log,
+    scenarios,
     scene_debug,
     selection_sync,
     setup_ops,
@@ -25,11 +26,12 @@ def _load_post(_filepath):
     # without a fake user; protect them before the next save drops them.
     generated.protect_all_generated_materials()
     restored = bake_scene.recover_interrupted_bake()
+    restored += scenarios.recover_interrupted_scenarios()
     if restored:
         log.warning(
             "Bake",
             f"Restored {restored} item(s) left by an interrupted bake "
-            "(render visibility, generated collection, work data)",
+            "(render visibility, generated collection, work data, scenario collections)",
         )
     identity.remember_identity_owners()
 
@@ -63,7 +65,7 @@ _HANDLERS = (
 
 
 def register():
-    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *bake.CLASSES, *export.CLASSES):
+    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES):
         bpy.utils.register_class(cls)
     data.register_properties()
     selection_sync.register()
@@ -92,7 +94,7 @@ def unregister():
     viewport_overlay.unregister()
     selection_sync.unregister()
     data.unregister_properties()
-    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *bake.CLASSES, *export.CLASSES)):
+    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES)):
         bpy.utils.unregister_class(cls)
 
 

@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 import bpy
 
-from .bake_scene import principled_nodes
+from .bake_scene import PipelineBakeError, principled_nodes
 from .constants import BAKE_LAYER_TYPES, BAKE_UV_NAME, PRIMARY_UV_NAME
 from .identity import duplicate_source_ids, find_layer, find_unit, layer_members, unit_members
+from .scenarios import Scope, Visibility, hidden_member_message, unit_scenario
 from .state import PipelineStateError, validate_state_configuration
 
 
@@ -123,6 +124,37 @@ def validate_unit(context, unit, require_visible=True):
     return issues
 
 
+def _validate_scenarios(context):
+    """Scenario references and units whose scenario switches off their own
+    members, checked in the active lighting state."""
+    project = context.scene.pm_vr_project
+    issues = []
+    scope = None
+    visibility = {}
+    for unit in project.bake_units:
+        try:
+            scenario = unit_scenario(project, unit)
+        except PipelineBakeError as exc:
+            issues.append(Issue('ERROR', str(exc)))
+            continue
+        if not scenario:
+            continue
+        if scope is None:
+            try:
+                scope = Scope(project, context.view_layer)
+            except PipelineBakeError as exc:
+                issues.append(Issue('ERROR', f"Bake scenarios: {exc}"))
+                return issues
+        if scenario.scenario_id not in visibility:
+            visibility[scenario.scenario_id] = Visibility(
+                context.view_layer, scope.flags(scenario, {})
+            )
+        message = hidden_member_message(unit, scenario, visibility[scenario.scenario_id])
+        if message:
+            issues.append(Issue('ERROR', message[:1].upper() + message[1:]))
+    return issues
+
+
 def validate_all(context):
     project = context.scene.pm_vr_project
     issues = validate_project(context)
@@ -181,6 +213,7 @@ def validate_all(context):
             issues.append(Issue('ERROR', "Additional exports require a valid primary layer and role", obj.name))
     for unit in project.bake_units:
         issues.extend(validate_unit(context, unit, require_visible=False))
+    issues.extend(_validate_scenarios(context))
     artifact_keys = [unit.artifact_key for unit in project.bake_units if unit.artifact_key]
     if len(artifact_keys) != len(set(artifact_keys)):
         issues.append(Issue('ERROR', "Bake units contain duplicate artifact keys"))

@@ -59,6 +59,27 @@ one state at a time. If a file is saved during a bake, or Blender stops in the
 middle of one, the temporary bake visibility and work data are restored the
 next time the file is opened.
 
+## Bake scenarios
+
+A bake scenario is a saved set of enabled and disabled collections inside
+Source Root (the outliner's Exclude checkbox), so a unit bakes only with the
+part of the scene that matters to it. In **Bake > Bake Scenarios**, switch
+collections in the outliner and click `+` to save them; **Capture Outliner**
+re-records the active scenario and **Show in Outliner** switches the outliner
+to it for checking (Ctrl+Z switches back). The checkbox list edits a scenario
+directly; disabling a collection also disables everything inside it.
+
+A render layer names the default scenario for its units; any unit can
+override it with another scenario or **No Scenario** (outliner as it is),
+in the queue row or in Setup. Checked units change together, like resolution.
+The queue switches collections before each unit and restores the outliner
+when it ends, is cancelled, or is interrupted (a file saved during the bake
+or recovered after a crash is restored on load). Day/Evening lighting
+collections and the collections that hold them are never switched by a
+scenario. Collections created after a scenario keep their outliner state
+until **Add** records them. The queue does not start when a scenario would
+disable a unit's own objects; **Validate Pipeline** reports the same.
+
 Every semantic layer has one authoritative type: `Unlit`, `PBR`, `Alpha`,
 `Translucent`, `Glass`, `Emissive`, or `Runtime`. The type directly
 defines both its runtime meaning and Blender behavior:

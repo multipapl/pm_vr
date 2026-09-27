@@ -8,11 +8,15 @@ from .constants import (
     MODE_ITEMS,
     RESOLUTION_ITEMS,
     ROLE_ITEMS,
+    SCENARIO_NONE,
     STATE_ITEMS,
 )
 
 
 _RESOLUTION_UPDATE_RUNNING = False
+# Blender reads dynamic enum strings after the items callback returns; Python
+# must keep them alive. Identical lists share one cached entry.
+_ENUM_ITEMS = {}
 
 
 def _overlay_updated(_owner, _context):
@@ -70,6 +74,149 @@ def _batch_resolution_changed(unit, context):
     _overlay_updated(unit, context)
 
 
+def _cached_items(items):
+    key = tuple(items)
+    if len(_ENUM_ITEMS) > 512:
+        _ENUM_ITEMS.clear()
+    return _ENUM_ITEMS.setdefault(key, items)
+
+
+def _scenario_index(project, scenario_id):
+    for index, scenario in enumerate(project.bake_scenarios):
+        if scenario.scenario_id == scenario_id:
+            return index
+    return None
+
+
+def _scenario_name(project, scenario_id):
+    if not scenario_id:
+        return "No Scenario"
+    index = _scenario_index(project, scenario_id)
+    return project.bake_scenarios[index].display_name if index is not None else "Missing Scenario"
+
+
+_NO_SCENARIO_DESCRIPTION = "Bake with the collections as they are in the outliner"
+
+
+def _scenario_choices(project, first_value):
+    return [
+        (
+            scenario.scenario_id,
+            scenario.display_name,
+            "Switch collections to this scenario while baking",
+            'NONE',
+            first_value + index,
+        )
+        for index, scenario in enumerate(project.bake_scenarios)
+    ]
+
+
+# Layer: 0 = No Scenario, 1.. = scenarios, then Missing for a removed ID.
+def _layer_scenario_items(layer, _context):
+    project = layer.id_data.pm_vr_project
+    items = [('NONE', "No Scenario", _NO_SCENARIO_DESCRIPTION, 'NONE', 0), None]
+    items += _scenario_choices(project, 1)
+    if layer.bake_scenario_id and _scenario_index(project, layer.bake_scenario_id) is None:
+        items.append((
+            'MISSING', "Missing Scenario", "The scenario was removed; choose another",
+            'ERROR', len(project.bake_scenarios) + 1,
+        ))
+    return _cached_items(items)
+
+
+def _get_layer_scenario(layer):
+    project = layer.id_data.pm_vr_project
+    if not layer.bake_scenario_id:
+        return 0
+    index = _scenario_index(project, layer.bake_scenario_id)
+    return len(project.bake_scenarios) + 1 if index is None else index + 1
+
+
+def _set_layer_scenario(layer, value):
+    project = layer.id_data.pm_vr_project
+    if value == 0:
+        layer.bake_scenario_id = ""
+    elif value <= len(project.bake_scenarios):
+        layer.bake_scenario_id = project.bake_scenarios[value - 1].scenario_id
+    else:
+        return
+    from . import log
+
+    log.info(
+        "Setup",
+        f'Layer "{layer.display_name}" bake scenario: '
+        f'{_scenario_name(project, layer.bake_scenario_id)}',
+    )
+
+
+# Unit: 0 = follow the layer, 1 = No Scenario, 2.. = scenarios, then Missing.
+def _unit_scenario_items(unit, _context):
+    project = unit.id_data.pm_vr_project
+    layer = next(
+        (item for item in project.render_layers if item.layer_id == unit.render_layer_id),
+        None,
+    )
+    inherited = _scenario_name(project, layer.bake_scenario_id if layer else "")
+    layer_name = layer.display_name if layer else "?"
+    # The link icon marks the layer's scenario; the name alone keeps queue rows narrow.
+    items = [
+        ('LAYER', inherited, f'Follow the scenario of layer "{layer_name}"', 'LINKED', 0),
+        None,
+        ('NONE', "No Scenario", _NO_SCENARIO_DESCRIPTION, 'NONE', 1),
+    ]
+    items += _scenario_choices(project, 2)
+    if (
+        unit.bake_scenario_id not in ("", SCENARIO_NONE)
+        and _scenario_index(project, unit.bake_scenario_id) is None
+    ):
+        items.append((
+            'MISSING', "Missing Scenario", "The scenario was removed; choose another",
+            'ERROR', len(project.bake_scenarios) + 2,
+        ))
+    return _cached_items(items)
+
+
+def _get_unit_scenario(unit):
+    project = unit.id_data.pm_vr_project
+    if not unit.bake_scenario_id:
+        return 0
+    if unit.bake_scenario_id == SCENARIO_NONE:
+        return 1
+    index = _scenario_index(project, unit.bake_scenario_id)
+    return len(project.bake_scenarios) + 2 if index is None else index + 2
+
+
+def _set_unit_scenario(unit, value):
+    project = unit.id_data.pm_vr_project
+    if value == 0:
+        scenario_id = ""
+    elif value == 1:
+        scenario_id = SCENARIO_NONE
+    elif value - 2 < len(project.bake_scenarios):
+        scenario_id = project.bake_scenarios[value - 2].scenario_id
+    else:
+        return
+    # Like resolution: checked units of the same layer change as one batch.
+    units = [unit]
+    if unit.batch_selected:
+        units += [
+            other for other in project.bake_units
+            if other != unit
+            and other.batch_selected
+            and other.render_layer_id == unit.render_layer_id
+        ]
+    for item in units:
+        item.bake_scenario_id = scenario_id
+    from . import log
+
+    label = "layer scenario" if not scenario_id else (
+        "No Scenario" if scenario_id == SCENARIO_NONE else _scenario_name(project, scenario_id)
+    )
+    names = ", ".join(f'"{item.display_name}"' for item in units[:5])
+    more = f" and {len(units) - 5} more" if len(units) > 5 else ""
+    log.info("Setup", f"Bake scenario of {names}{more}: {label}")
+
+
 class PMVR_ExtraExportLayer(bpy.types.PropertyGroup):
     layer_id: bpy.props.StringProperty(name="Export Layer ID", options={'HIDDEN'})
 
@@ -110,6 +257,14 @@ class PMVR_RenderLayer(bpy.types.PropertyGroup):
     )
     export_usdz: bpy.props.BoolProperty(name="USDZ", default=True)
     export_glb: bpy.props.BoolProperty(name="GLB", default=False)
+    bake_scenario_id: bpy.props.StringProperty(name="Bake Scenario ID", options={'HIDDEN'})
+    bake_scenario: bpy.props.EnumProperty(
+        name="Bake Scenario",
+        description="Collections switched on and off while this layer's units bake",
+        items=_layer_scenario_items,
+        get=_get_layer_scenario,
+        set=_set_layer_scenario,
+    )
 
 
 class PMVR_BakeUnit(bpy.types.PropertyGroup):
@@ -144,6 +299,37 @@ class PMVR_BakeUnit(bpy.types.PropertyGroup):
     evening_lightmap_status: bpy.props.StringProperty(name="Evening Lightmap Status")
     day_status: bpy.props.StringProperty(name="Day Status")
     evening_status: bpy.props.StringProperty(name="Evening Status")
+    # "" follows the layer's scenario, SCENARIO_NONE bakes with the outliner
+    # as it is, anything else is a scenario ID.
+    bake_scenario_id: bpy.props.StringProperty(name="Bake Scenario ID", options={'HIDDEN'})
+    bake_scenario: bpy.props.EnumProperty(
+        name="Bake Scenario",
+        description=(
+            "Collections switched on and off while this unit bakes. Checked "
+            "units of the same layer change together"
+        ),
+        items=_unit_scenario_items,
+        get=_get_unit_scenario,
+        set=_set_unit_scenario,
+    )
+
+
+class PMVR_ScenarioCollection(bpy.types.PropertyGroup):
+    # name holds the collection name at capture time for list filtering.
+    collection: bpy.props.PointerProperty(name="Collection", type=bpy.types.Collection)
+    include: bpy.props.BoolProperty(
+        name="Enabled",
+        description="Keep this collection enabled while the scenario bakes",
+        default=True,
+    )
+    depth: bpy.props.IntProperty(name="Depth", default=0, min=0, options={'HIDDEN'})
+
+
+class PMVR_BakeScenario(bpy.types.PropertyGroup):
+    scenario_id: bpy.props.StringProperty(name="Scenario ID", options={'HIDDEN'})
+    display_name: bpy.props.StringProperty(name="Name", default="Scenario")
+    collections: bpy.props.CollectionProperty(type=PMVR_ScenarioCollection)
+    active_collection_index: bpy.props.IntProperty(default=0, min=0)
 
 
 class PMVR_BakeQueueEntry(bpy.types.PropertyGroup):
@@ -239,6 +425,9 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     bake_queue: bpy.props.CollectionProperty(type=PMVR_BakeQueueEntry)
     active_bake_queue_index: bpy.props.IntProperty(default=0, min=0)
     build_records: bpy.props.CollectionProperty(type=PMVR_BuildRecord)
+    bake_scenarios: bpy.props.CollectionProperty(type=PMVR_BakeScenario)
+    active_bake_scenario_index: bpy.props.IntProperty(default=0, min=0)
+    show_bake_scenarios: bpy.props.BoolProperty(name="Bake Scenarios", default=True)
 
     show_sources: bpy.props.BoolProperty(name="Show Sources", default=True)
     show_generated: bpy.props.BoolProperty(name="Show Generated", default=True)
@@ -253,6 +442,8 @@ CLASSES = (
     PMVR_ObjectMetadata,
     PMVR_RenderLayer,
     PMVR_BakeUnit,
+    PMVR_ScenarioCollection,
+    PMVR_BakeScenario,
     PMVR_BakeQueueEntry,
     PMVR_BuildRecord,
     PMVR_ProjectSettings,
