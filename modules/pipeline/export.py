@@ -10,7 +10,7 @@ import bpy
 
 from .. import collection_export
 from .bake_files import png_size, scale_atlas, write_swatch
-from .bake_scene import PipelineBakeError
+from .bake_scene import PipelineBakeError, same_structure
 from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .generated import (
     bind_generated_state,
@@ -57,7 +57,7 @@ def _unit_ready(unit, state):
     other = unit.evening_signature if state == 'DAY' else unit.day_signature
     if not signature or status != "Ready":
         return False, f'{unit.display_name}: {state.title()} Beauty is not ready'
-    if other and other != signature:
+    if other and not same_structure(other, signature):
         return False, f'{unit.display_name}: Day/Evening structure is incompatible; rebake both states'
     return True, ""
 

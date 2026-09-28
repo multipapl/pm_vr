@@ -10,6 +10,7 @@ from .bake_scene import (
     pipeline_collection,
     find_alpha_source,
     principled_nodes,
+    same_structure,
 )
 from .constants import (
     BAKE_UV_NAME,
@@ -319,7 +320,7 @@ def _previous_signature(unit, mode):
 def check_commit(unit, layer, receivers, staged, signature, mode='BEAUTY'):
     """Reject an uncommittable result before any artifact is replaced."""
     previous_signature = _previous_signature(unit, mode)
-    compatible = not previous_signature or previous_signature == signature
+    compatible = not previous_signature or same_structure(previous_signature, signature)
     collapse_to_one = mode == 'BEAUTY' and layer.layer_type in UNLIT_LAYER_TYPES
     for receiver in receivers:
         source = receiver["source"]
@@ -410,7 +411,7 @@ def commit_generated_geometry(context, unit, layer, receivers, signature, mode='
     generated_collection = pipeline_collection(GENERATED_COLLECTION)
     ensure_scene_collection(context.scene, generated_collection)
     previous_signature = _previous_signature(unit, mode)
-    compatible = not previous_signature or previous_signature == signature
+    compatible = not previous_signature or same_structure(previous_signature, signature)
     for receiver in receivers:
         source = receiver["source"]
         source_id = source.pm_vr_pipeline.source_id
@@ -470,9 +471,9 @@ def commit_generated_geometry(context, unit, layer, receivers, signature, mode='
         generated.matrix_world = source.matrix_world.copy()
     _relink_generated_children(unit, layer, generated_by_source, mode)
     if mode == 'BEAUTY' and not compatible:
-        if unit.day_signature and unit.day_signature != signature:
+        if unit.day_signature and not same_structure(unit.day_signature, signature):
             unit.day_status = "Structurally incompatible — rebake required"
-        if unit.evening_signature and unit.evening_signature != signature:
+        if unit.evening_signature and not same_structure(unit.evening_signature, signature):
             unit.evening_status = "Structurally incompatible — rebake required"
 
 

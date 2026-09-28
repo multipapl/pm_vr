@@ -29,6 +29,7 @@ from .bake_scene import (
     pipeline_collection,
     remove_work_collection,
     restore_viewport_shading,
+    same_structure,
     select_only,
     set_target_image,
     signature_for_receivers,
@@ -187,7 +188,7 @@ class BeautyBakeRuntime:
             self.receivers,
             self.layer.layer_type,
         )
-        if self.variant and self.signature != self._unit_signature():
+        if self.variant and not same_structure(self.signature, self._unit_signature()):
             raise PipelineBakeError(
                 "the unit changed since its bake; rebake the unit (its variants bake with it)"
             )
@@ -388,7 +389,7 @@ class BeautyBakeRuntime:
             if self.state == 'DAY'
             else self.unit.day_signature
         )
-        if other_signature and other_signature != self.signature:
+        if other_signature and not same_structure(other_signature, self.signature):
             if self.state == 'DAY':
                 self.unit.evening_status = (
                     "Structurally incompatible — rebake required"
@@ -397,6 +398,13 @@ class BeautyBakeRuntime:
                 self.unit.day_status = (
                     "Structurally incompatible — rebake required"
                 )
+        elif other_signature:
+            # The other state matches this structure: an earlier false alarm
+            # (Bevel UV noise) no longer stands.
+            if self.state == 'DAY' and self.unit.evening_status.startswith("Structurally incompatible"):
+                self.unit.evening_status = "Ready"
+            elif self.state == 'EVENING' and self.unit.day_status.startswith("Structurally incompatible"):
+                self.unit.day_status = "Ready"
         _record(
             self.project,
             self.unit,

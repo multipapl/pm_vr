@@ -16,6 +16,7 @@ import re
 
 import bpy
 
+from .bake_scene import same_structure
 from .identity import find_layer, new_id, safe_stem, unit_members
 from .setup_ops import active_unit
 
@@ -93,7 +94,7 @@ def variant_status(unit, variant, state):
         return ""
     signature = variant.day_signature if state == 'DAY' else variant.evening_signature
     unit_signature = unit.day_signature if state == 'DAY' else unit.evening_signature
-    return "Ready" if signature and signature == unit_signature else "Rebake"
+    return "Ready" if signature and unit_signature and same_structure(signature, unit_signature) else "Rebake"
 
 
 def staging_folder(project):

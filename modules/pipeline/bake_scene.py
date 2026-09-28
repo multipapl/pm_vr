@@ -589,7 +589,15 @@ def bake_receivers(
         config.restore()
 
 
+SIGNATURE_VERSION = "2:"
+
+
 def signature_for_receivers(receivers, layer_type=""):
+    """Structure a result was baked for: topology and material slots of the
+    evaluated mesh, the transform, the modifier stack and the authored
+    SimpleBake UVs. Evaluated UVs are not used: Bevel (multi-threaded)
+    returns them a float step apart on every evaluation, which made Day
+    and Evening of the same object look incompatible."""
     digest = hashlib.sha256()
     digest.update(layer_type.encode())
     for receiver in sorted(receivers, key=lambda item: item["source"].pm_vr_pipeline.source_id):
@@ -598,7 +606,9 @@ def signature_for_receivers(receivers, layer_type=""):
         digest.update(source.pm_vr_pipeline.source_id.encode())
         digest.update(f"{len(mesh.vertices)}:{len(mesh.edges)}:{len(mesh.polygons)}:{len(mesh.loops)}".encode())
         digest.update(array('f', [value for row in source.matrix_world for value in row]).tobytes())
-        uv = mesh.uv_layers.get(BAKE_UV_NAME)
+        digest.update(",".join(m.type for m in source.modifiers if m.show_render).encode())
+        authored = getattr(source.data, "uv_layers", None)
+        uv = (authored.get(BAKE_UV_NAME) if authored else None) or mesh.uv_layers.get(BAKE_UV_NAME)
         coords = array('f', [0.0]) * (len(uv.data) * 2)
         uv.data.foreach_get("uv", coords)
         digest.update(coords.tobytes())
@@ -608,4 +618,13 @@ def signature_for_receivers(receivers, layer_type=""):
             digest.update(indices.tobytes())
         digest.update(str(len(mesh.materials)).encode())
     digest.update(str(SCHEMA_VERSION).encode())
-    return digest.hexdigest()
+    return SIGNATURE_VERSION + digest.hexdigest()
+
+
+def same_structure(first, second):
+    """Whether two stored signatures describe the same structure. One from
+    before signature version 2 cannot be compared with a current one; they
+    count as the same, so older results need no rebake."""
+    if first.startswith(SIGNATURE_VERSION) != second.startswith(SIGNATURE_VERSION):
+        return True
+    return first == second
