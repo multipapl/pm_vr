@@ -350,10 +350,11 @@ class PMVR_OT_FlattenNodes(bpy.types.Operator):
         name="Long Side",
         description=(
             "Pixels on the longer side of the new texture; the other side keeps "
-            "the aspect ratio. Below the original the texels are averaged down"
+            "the aspect ratio. Below the original the texels are averaged down. "
+            "0 keeps the original size"
         ),
-        default=1024,
-        min=16,
+        default=0,
+        min=0,
         soft_max=8192,
     )
     source_width: bpy.props.IntProperty(options={'HIDDEN', 'SKIP_SAVE'})
@@ -400,7 +401,7 @@ class PMVR_OT_FlattenNodes(bpy.types.Operator):
         layout = self.layout
         layout.prop(self, "long_side")
         source = (self.source_width, self.source_height) if self.source_width else None
-        width, height = output_size(source, self.long_side)
+        width, height = output_size(source, self.long_side or (max(source) if source else 1024))
         layout.label(
             text=(f"Original {source[0]} x {source[1]}  ->  " if source else "No image in the selection  ->  ")
             + f"{width} x {height}"
@@ -427,6 +428,9 @@ class PMVR_OT_FlattenNodes(bpy.types.Operator):
 def _draw_menu(self, context):
     if PMVR_OT_FlattenNodes.poll(context):
         self.layout.separator()
+        # The node context menu ends in EXEC_REGION_WIN, which would skip the
+        # size dialog.
+        self.layout.operator_context = 'INVOKE_DEFAULT'
         self.layout.operator(PMVR_OT_FlattenNodes.bl_idname, icon='TEXTURE')
 
 
