@@ -1,6 +1,7 @@
 """External Beauty/Lightmap files, staged beside their final path until commit."""
 
 import os
+import struct
 import uuid
 
 import bpy
@@ -110,60 +111,85 @@ def stage_beauty_image(context, unit, state, image):
     return staged
 
 
-def _png_scene(name, context_scene):
-    scene = bpy.data.scenes.new(name)
-    settings = scene.render.image_settings
-    settings.file_format = 'PNG'
-    settings.color_mode = 'RGB'
-    settings.color_depth = '8'
-    scene.view_settings.view_transform = 'Standard'
+def png_size(path):
+    """(width, height) from a PNG header, without loading the image."""
     try:
-        scene.view_settings.look = 'None'
-    except (TypeError, ValueError):
-        pass
-    try:
-        scene.display_settings.display_device = context_scene.display_settings.display_device
-    except (AttributeError, TypeError, ValueError):
-        pass
-    return scene
+        with open(path, "rb") as handle:
+            head = handle.read(24)
+    except OSError:
+        return None
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return struct.unpack(">II", head[16:24])
 
 
-def downscale_staged_beauty(context, image, path, size):
-    """Shrink a staged Beauty PNG (baked larger, already denoised) to size.
+def _srgb_to_linear(values):
+    return numpy.where(values <= 0.04045, values / 12.92, ((values + 0.055) / 1.055) ** 2.4)
 
-    Blocks are averaged in linear light, like more samples per pixel would;
+
+def _linear_to_srgb(values):
+    values = numpy.clip(values, 0.0, None)
+    return numpy.where(values <= 0.0031308, values * 12.92, 1.055 * values ** (1.0 / 2.4) - 0.055)
+
+
+def _area_average(values, size, axis):
+    """Shrink one axis to size: each output pixel averages the source pixels
+    it covers, weighted by covered area. The mean is kept exactly, for any
+    ratio (3072 to 2048 as well as 4096 to 1024)."""
+    count = values.shape[axis]
+    if count == size:
+        return values
+    integral = numpy.cumsum(values, axis=axis, dtype=numpy.float64)
+    integral = numpy.insert(integral, 0, 0.0, axis=axis)
+    edges = numpy.arange(size + 1, dtype=numpy.float64) * (count / size)
+    lower = numpy.minimum(numpy.floor(edges), count - 1).astype(numpy.int64)
+    shape = [1] * values.ndim
+    shape[axis] = size + 1
+    fraction = (edges - lower).reshape(shape)
+    base = numpy.take(integral, lower, axis=axis)
+    at_edges = base + fraction * (numpy.take(integral, lower + 1, axis=axis) - base)
+    return numpy.diff(at_edges, axis=axis) * (size / count)
+
+
+def scale_atlas(source_path, target_path, size):
+    """Write the atlas at source_path as a size x size 8-bit PNG at
+    target_path; the source file is not touched.
+
+    Pixels are averaged in linear light by covered area, as the headset's
+    own texture filtering does, so colour and brightness stay as baked;
     averaging the sRGB-encoded values would darken fine contrast."""
-    # A fresh load of the 8-bit PNG gives its sRGB-encoded values, whatever
-    # buffer the bake image itself uses.
-    source = bpy.data.images.load(path, check_existing=False)
+    source = bpy.data.images.load(source_path, check_existing=False)
     try:
         width, height = source.size
         pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
         source.pixels.foreach_get(pixels)
+        is_float = source.is_float
     finally:
         bpy.data.images.remove(source)
-    factor = width // size
-    if factor <= 1:
-        return
     rgb = pixels.reshape(height, width, 4)[..., :3]
-    linear = numpy.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
-    linear = linear.reshape(size, factor, size, factor, 3).mean(axis=(1, 3))
-    encoded = numpy.where(
-        linear <= 0.0031308,
-        linear * 12.92,
-        1.055 * numpy.power(numpy.clip(linear, 0.0, None), 1.0 / 2.4) - 0.055,
-    )
+    if is_float:
+        # A float file is already linear.
+        linear_channels = [rgb[..., channel] for channel in range(3)]
+    else:
+        # An 8-bit file gives its encoded values; a table converts all 256.
+        table = _srgb_to_linear(numpy.arange(256, dtype=numpy.float64) / 255.0)
+        codes = numpy.rint(rgb * 255.0).astype(numpy.uint8)
+        linear_channels = [table[codes[..., channel]] for channel in range(3)]
+    del pixels, rgb
     result = numpy.ones((size, size, 4), dtype=numpy.float32)
-    result[..., :3] = numpy.clip(encoded, 0.0, 1.0)
-    small = bpy.data.images.new(f"__PMVR_DOWNSCALE_{uuid.uuid4().hex}", size, size, alpha=False)
-    scene = _png_scene(f"__PMVR_DOWNSCALE_{uuid.uuid4().hex}", context.scene)
+    for channel, linear in enumerate(linear_channels):
+        linear = _area_average(linear, size, 1)
+        linear = _area_average(linear, size, 0)
+        result[..., channel] = numpy.clip(_linear_to_srgb(linear), 0.0, 1.0)
+    small = bpy.data.images.new(f"__PMVR_SCALE_{uuid.uuid4().hex}", size, size, alpha=False)
     try:
         small.pixels.foreach_set(result.ravel())
-        small.save_render(path, scene=scene)
+        # The byte buffer is written as it is: no view transform.
+        small.filepath_raw = target_path
+        small.file_format = 'PNG'
+        small.save()
     finally:
         bpy.data.images.remove(small)
-        bpy.data.scenes.remove(scene)
-    image.reload()
 
 
 def beauty_image_name(layer, unit, state):

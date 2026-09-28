@@ -1,6 +1,7 @@
 """Bake queue: Beauty unit runtime, Lightmap units and the modal queue operator."""
 
 from datetime import datetime
+import math
 import time
 import uuid
 
@@ -13,7 +14,6 @@ from ..lightmap_baker.state import ContextState
 from .bake_files import (
     beauty_image_name,
     commit_staged_file,
-    downscale_staged_beauty,
     stage_beauty_image,
     stage_lightmap_image,
 )
@@ -47,7 +47,7 @@ from .generated import (
 )
 from .identity import find_layer, find_unit, unit_members
 from .scenarios import ScenarioSession, preflight as scenario_preflight
-from .setup_ops import bake_resolution, bake_sizes, preview_state, test_resolution_label
+from .setup_ops import bake_size, lightmap_resolution, preview_state, test_resolution_label
 from . import log, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
@@ -129,9 +129,12 @@ class BeautyBakeRuntime:
         for source in self.members:
             self.snapshot.hide(source)
         self.context.scene.cycles.samples = self.project.cycles_samples
-        self.bake_size, self.resolution = bake_sizes(self.project, self.unit)
-        # The margin is meant in saved pixels; a larger bake needs it scaled.
-        self.margin = self.project.margin * (self.bake_size // self.resolution)
+        # The file keeps the bake size; export scales it to the unit's
+        # resolution (or ships it as is when smaller, a test bake).
+        self.bake_size = bake_size(self.project, self.unit)
+        self.resolution = min(int(self.unit.resolution), self.bake_size)
+        # The margin is meant in exported pixels; a larger bake scales it.
+        self.margin = math.ceil(self.project.margin * self.bake_size / self.resolution)
         self.image = create_float_image(
             beauty_image_name(self.layer, self.unit, self.state),
             self.bake_size,
@@ -170,12 +173,10 @@ class BeautyBakeRuntime:
         log.info(
             "Beauty",
             f'Start {self.state.title()} unit "{self.unit.display_name}": '
-            f'{len(self.receivers)} object(s), {self.resolution}px'
-            + (
-                f' (test, Setup {self.unit.resolution}px)'
-                if self.resolution != int(self.unit.resolution) else ''
-            )
-            + (f', baked at {self.bake_size}px' if self.bake_size != self.resolution else '')
+            f'{len(self.receivers)} object(s), {self.bake_size}px'
+            + (f' (test {test_resolution_label(self.project)})' if test_resolution_label(self.project) else '')
+            + f', exports at {self.resolution}px'
+            + (f' (Setup {self.unit.resolution}px)' if self.resolution != int(self.unit.resolution) else '')
             + f', {self.project.cycles_samples} samples',
         )
         return "READY"
@@ -247,13 +248,6 @@ class BeautyBakeRuntime:
                     "Beauty",
                     f'{self.unit.display_name}: denoise failed; using raw Beauty: {exc}',
                 )
-            if self.bake_size != self.resolution:
-                downscale_staged_beauty(
-                    self.context,
-                    self.image,
-                    staged_file.staging_path,
-                    self.resolution,
-                )
             _show_bake_stage(
                 self.operator,
                 "Build preview result",
@@ -317,12 +311,12 @@ class BeautyBakeRuntime:
             self.unit.day_signature = self.signature
             self.unit.day_beauty_image = self.image.name
             self.unit.day_status = "Ready"
-            self.unit.day_baked_resolution = self.resolution
+            self.unit.day_baked_resolution = self.bake_size
         else:
             self.unit.evening_signature = self.signature
             self.unit.evening_beauty_image = self.image.name
             self.unit.evening_status = "Ready"
-            self.unit.evening_baked_resolution = self.resolution
+            self.unit.evening_baked_resolution = self.bake_size
         other_signature = (
             self.unit.evening_signature
             if self.state == 'DAY'
@@ -478,7 +472,7 @@ def bake_lightmap_unit(context, unit, operator=None):
         for source in members:
             snapshot.hide(source)
         context.scene.cycles.samples = project.cycles_samples
-        resolution = bake_resolution(project, unit)
+        resolution = lightmap_resolution(project, unit)
         raw = create_float_image(
             f"PMVR_Lightmap_{unit.artifact_key[:8]}_{state}_{uuid.uuid4().hex[:8]}",
             resolution,
@@ -731,12 +725,12 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             "Bake",
             f"Queue start: {len(project.bake_queue)} unit(s), "
             f"states {', '.join(states)}, mode {project.bake_mode}, "
-            f"{project.cycles_samples} samples, margin {project.margin}px"
+            f"{project.cycles_samples} samples, margin {project.margin}px, "
+            f"Bake Resolution {project.bake_resolution}px"
             + (
-                f", TEST resolution {test_resolution_label(project)} of Setup"
+                f", TEST {test_resolution_label(project)}"
                 if test_resolution_label(project) else ""
-            )
-            + (", bake at 4K" if project.bake_at_max_resolution else ""),
+            ),
         )
         log.info("Bake", log.environment(context))
         render = context.scene.render

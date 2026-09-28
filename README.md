@@ -45,14 +45,20 @@ and duplicates are ignored.
 
 New units receive an initial 1K/2K/4K resolution suggestion (4K at most) from the
 `SimpleBake` UV channel and the project texel-density target. Missing or invalid
-second UV channels safely fall back to the configured default resolution. The
-**Bake at 4K, save at unit size** bakes every unit at 4096, denoises it there and
-averages it down (in linear light) to the unit's resolution, like SimpleBake's
-separate bake and output sizes: sharper detail and less noise, at up to 16x the
-bake time for 1K units. The margin is scaled with it, and the Test switch scales
-both sizes. The Bake stage **Test** switch (100/75/50/25%) bakes the queue smaller for quick
-checks without touching the Setup resolutions; it is back at 100% when a file
-opens. A unit baked below its Setup resolution shows it in its status, and
+second UV channels safely fall back to the configured default resolution.
+
+Bake and delivery sizes are separate, like SimpleBake's bake and output sizes.
+Every unit bakes and is denoised at the **Bake Resolution** (Project Settings,
+4096 by default; a unit set higher bakes at its own), and its PNG keeps that
+size; Blender shows it. Export writes each atlas into the USDZ/GLB at its unit's
+resolution, averaged in linear light by covered area, so colour and brightness
+stay as baked (the mean moves by less than a tenth of an 8-bit step). The baked
+file is not changed, so a unit's resolution can be lowered, or raised back up to
+the baked size, without a rebake. The margin is scaled so it keeps its width at
+the unit's resolution. The Bake stage **Test** switch (100/75/50/25%) bakes the
+queue at a share of the Bake Resolution for quick checks; it is back at 100%
+when a file opens. A unit whose baked file is smaller than its resolution (a test
+bake, or a resolution raised above the baked size) shows it in its status, and
 export warns about it.
 
 Beauty bake uses Cycles Combined at 256 samples by default, shared image targets,

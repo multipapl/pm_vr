@@ -1,12 +1,15 @@
 """Semantic layer export assembled from generated and original representations."""
 
+from contextlib import contextmanager
 import os
 import shutil
+import tempfile
 import uuid
 
 import bpy
 
 from .. import collection_export
+from .bake_files import png_size, scale_atlas
 from .bake_scene import PipelineBakeError
 from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .generated import (
@@ -122,6 +125,77 @@ def resolve_layer_objects(context, layer):
     return resolved
 
 
+class ExportTextures:
+    """Beauty atlases at their units' resolution, for one export run.
+
+    The baked files stay at the Bake Resolution. While a layer is written,
+    each Beauty image points at a copy averaged down to its unit's
+    resolution, then back at the baked file. A copy keeps the baked file's
+    name, so the USDZ texture names do not change."""
+
+    def __init__(self):
+        self.folder = tempfile.mkdtemp(prefix="pmvr_export_textures_")
+        self.copies = {}
+
+    def cleanup(self):
+        shutil.rmtree(self.folder, ignore_errors=True)
+
+    def summary(self):
+        pairs = {}
+        for (_path, size), (_copy, baked) in self.copies.items():
+            pairs[(baked, size)] = pairs.get((baked, size), 0) + 1
+        return ", ".join(
+            f"{count} x {baked} to {size}" for (baked, size), count in sorted(pairs.items(), reverse=True)
+        )
+
+    def _copy(self, path, size):
+        key = (os.path.normcase(os.path.abspath(path)), size)
+        if key not in self.copies:
+            folder = os.path.join(self.folder, str(len(self.copies)))
+            os.makedirs(folder)
+            copy = os.path.join(folder, os.path.basename(path))
+            baked = png_size(path)[0]
+            scale_atlas(path, copy, size)
+            self.copies[key] = (copy, baked)
+        return self.copies[key][0]
+
+    @contextmanager
+    def scaled(self, project, objects):
+        images = {}
+        for obj in objects:
+            if not obj.get(TAG_GENERATED):
+                continue
+            for slot in obj.material_slots:
+                material = slot.material
+                if not material or not material.node_tree:
+                    continue
+                for node in material.node_tree.nodes:
+                    image = getattr(node, "image", None)
+                    if node.type == 'TEX_IMAGE' and image and image.get(TAG_MODE) == 'BEAUTY':
+                        images[image.name_full] = image
+        swapped = []
+        try:
+            for image in images.values():
+                unit = find_unit(project, image.get(TAG_UNIT_ID, ""))
+                path = bpy.path.abspath(image.filepath)
+                size = png_size(path) if unit and image.source == 'FILE' else None
+                if not size or size[0] <= int(unit.resolution):
+                    # Already at (or below) the unit's resolution: as baked.
+                    continue
+                copy = self._copy(path, int(unit.resolution))
+                swapped.append((image, image.filepath))
+                image.filepath = copy
+                image.reload()
+            yield
+        finally:
+            for image, filepath in swapped:
+                try:
+                    image.filepath = filepath
+                    image.reload()
+                except ReferenceError:
+                    pass
+
+
 def _make_assembly(scene, layer, objects):
     collection = bpy.data.collections.new(f"__PMVR_EXPORT_{layer.layer_id[:8]}_{uuid.uuid4().hex[:8]}")
     scene.collection.children.link(collection)
@@ -158,13 +232,16 @@ def _temporary_export_path(final_path):
     return folder, os.path.join(folder, filename)
 
 
-def export_semantic_layer(context, layer, format_name):
+def export_semantic_layer(context, layer, format_name, textures=None):
     project = context.scene.pm_vr_project
     # Export binds the active state's materials to canonical generated objects;
     # put the viewport preview binding back afterwards.
     bindings = snapshot_generated_bindings()
     assembly = None
     folder = None
+    own_textures = textures is None
+    if own_textures:
+        textures = ExportTextures()
     try:
         objects = resolve_layer_objects(context, layer)
         if not objects:
@@ -179,7 +256,8 @@ def export_semantic_layer(context, layer, format_name):
         try:
             for obj in render_disabled:
                 obj.hide_render = False
-            result = exporter(assembly, temporary_path)
+            with textures.scaled(project, objects):
+                result = exporter(assembly, temporary_path)
         finally:
             for obj in render_disabled:
                 obj.hide_render = True
@@ -195,6 +273,8 @@ def export_semantic_layer(context, layer, format_name):
         restore_generated_bindings(bindings)
         if folder:
             shutil.rmtree(folder, ignore_errors=True)
+        if own_textures:
+            textures.cleanup()
 
 
 class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
@@ -264,13 +344,14 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             f"{bpy.data.filepath or 'unsaved file'}",
         )
         project.operation_running = True
+        textures = ExportTextures()
         try:
             context.window_manager.progress_begin(0, len(jobs))
             for index, (layer, format_name) in enumerate(jobs):
                 context.window_manager.progress_update(index)
                 project.operation_progress = index / max(1, len(jobs))
                 try:
-                    status, message = export_semantic_layer(context, layer, format_name)
+                    status, message = export_semantic_layer(context, layer, format_name, textures)
                     if status == 'SKIPPED':
                         skipped += 1
                         log.info("Export", f'Skipped "{layer.display_name}" ({format_name}): {message}')
@@ -293,6 +374,10 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         finally:
             context.window_manager.progress_end()
             project.operation_running = False
+            scaled = textures.summary()
+            textures.cleanup()
+        if scaled:
+            log.info("Export", f"Atlases scaled to unit resolution: {scaled}")
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"

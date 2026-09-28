@@ -631,20 +631,26 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
         return {'FINISHED'}
 
 
-def bake_resolution(project, unit):
-    """Resolution the queue bakes unit at: its Setup value, scaled down while
-    a test resolution is chosen."""
-    return max(64, int(unit.resolution) * int(project.test_resolution) // 100)
+def _test_share(project, size):
+    return max(64, int(size) * int(project.test_resolution) // 100)
 
 
-def bake_sizes(project, unit):
-    """(bake size, saved size) for a unit. Bake at 4K bakes at the largest
-    resolution (scaled by the test resolution) and saves at the unit's."""
-    saved = bake_resolution(project, unit)
-    if not project.bake_at_max_resolution:
-        return saved, saved
-    baked = max(saved, SUPPORTED_RESOLUTIONS[-1] * int(project.test_resolution) // 100)
-    return baked, saved
+def bake_size(project, unit):
+    """Size the queue bakes a unit's Beauty at, and the size of the file it
+    keeps: the Bake Resolution (the unit's own when larger), scaled down
+    while a test resolution is chosen. Export scales it to the unit's
+    resolution, so that can change later without a rebake."""
+    return _test_share(project, max(int(project.bake_resolution), int(unit.resolution)))
+
+
+def queue_bake_size(project):
+    """What the queue bakes units at (larger units bake at their own)."""
+    return _test_share(project, project.bake_resolution)
+
+
+def lightmap_resolution(project, unit):
+    """Lightmaps bake at the unit's resolution (scaled by the test share)."""
+    return _test_share(project, unit.resolution)
 
 
 def test_resolution_label(project):
@@ -1127,6 +1133,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         evening.prop(project, "evening_world")
         bake = layout.box()
         bake.label(text="Bake Defaults", icon='RENDER_STILL')
+        bake.prop(project, "bake_resolution")
         bake.prop(project, "default_unit_resolution")
         bake.prop(context.scene, "pm_vr_target_td", text="Target TD px/cm")
         bake.prop(project, "margin")

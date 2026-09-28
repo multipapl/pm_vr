@@ -432,25 +432,26 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     test_resolution: bpy.props.EnumProperty(
         name="Test Resolution",
         description=(
-            "Bake the queue at a share of each unit's Setup resolution for a "
-            "quick check. Setup keeps its values; back to 100% when a file opens"
+            "Bake the queue at a share of the Bake Resolution for a quick "
+            "check. Setup keeps its values; back to 100% when a file opens"
         ),
         items=(
-            ('100', "100%", "Bake at the resolutions set in Setup", 0),
-            ('75', "75%", "Bake at three quarters of the Setup resolution", 1),
-            ('50', "50%", "Bake at half the Setup resolution", 2),
-            ('25', "25%", "Bake at a quarter of the Setup resolution", 3),
+            ('100', "100%", "Bake at the Bake Resolution", 0),
+            ('75', "75%", "Bake at three quarters of the Bake Resolution", 1),
+            ('50', "50%", "Bake at half the Bake Resolution", 2),
+            ('25', "25%", "Bake at a quarter of the Bake Resolution", 3),
         ),
         default='100',
     )
-    bake_at_max_resolution: bpy.props.BoolProperty(
-        name="Bake at 4K",
+    bake_resolution: bpy.props.EnumProperty(
+        name="Bake Resolution",
         description=(
-            "Bake every unit at 4096 and save it at the unit's resolution: "
-            "sharper edges and less noise, slower for smaller units. Test "
-            "resolution scales both"
+            "Every unit bakes at this size (its own when larger) and keeps "
+            "the file at it. Export scales each atlas to its unit's "
+            "resolution, so a unit's resolution can change without a rebake"
         ),
-        default=False,
+        items=RESOLUTION_ITEMS,
+        default='4096',
     )
     margin: bpy.props.IntProperty(name="Margin", default=16, min=0, soft_max=128)
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)

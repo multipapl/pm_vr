@@ -75,7 +75,7 @@ Handled the same day:
 
 ## Bake at 4K and small fixes (2026-09-28)
 
-- `project.bake_at_max_resolution`: units bake at 4096 (times the test share), are denoised at that size, and `downscale_staged_beauty()` averages blocks in linear light down to the unit's resolution before materials are built. The bake margin is scaled by the factor. Test: brightness ratio 1.000 against a direct bake at the same size. On UniPlace `Artwork` (1024): 2.25x the fine-detail energy of a direct 1024 bake, colour within 1.7%, 176 s instead of 20 s.
+- Superseded the same day by Bake Resolution (below). `project.bake_at_max_resolution`: units bake at 4096 (times the test share), are denoised at that size, and `downscale_staged_beauty()` averages blocks in linear light down to the unit's resolution before materials are built. The bake margin is scaled by the factor. Test: brightness ratio 1.000 against a direct bake at the same size. On UniPlace `Artwork` (1024): 2.25x the fine-detail energy of a direct 1024 bake, colour within 1.7%, 176 s instead of 20 s.
 - PBR generated materials drop the unreachable old Base Color branch (`_prune_unreachable_material_nodes`), like Alpha.
 - A Beauty folder on another drive than the .blend made the commit fail (`relpath` across drives); `_blend_relative()` keeps such paths absolute.
 - The Setup resolution log names the object and says when the required size is above 4096 (texel density stays below target).
@@ -84,84 +84,27 @@ Handled the same day:
 ## Task list (2026-09-28, waiting for the user's go)
 
 1. **Lighting switch leaves nested collections off.** `activate_state()` sets Exclude only on the Day/Evening collection. Blender's recursive Exclude remembers children that were excluded before the parent ("previously excluded") and keeps them off when the parent is re-enabled, so nested light groups stay off, also during queue bakes. Plan: activating a state includes its lighting collection with every nested collection, the other state's collection is excluded whole; the switch owns Exclude inside lighting collections (to leave a group out, move it out or disable its render). Test with nested collections and remembered exclusions. Inspect UniPlace read-only for nested lighting collections that were off during the last bakes and tell the user which states/units need a rebake. Rule confirmed by the user: whatever is in a lighting collection is switched on with all its nested collections. **Done:** `activate_state()` switches each lighting subtree whole (`_switch_subtree`). On UniPlace the nested groups Shelfs (48 lamps), Stairs_Daylight (95), LampsLR_Day, SkyboxDaylight and Stairs_Night (95), Shelfs_Night (48), LampsLR_Night, SkyboxNight were off after every switch; bakes made in that state miss them. Scenario lists now follow the collection tree (`sync_scenarios` on depsgraph updates when the tree changes, and on load); lighting subtrees stay out of scenarios.
-2. **Bake resolution vs export resolution**, see below; confirm the open decisions first.
+2. **Bake resolution vs export resolution.** **Done**, see "Bake Resolution and export at unit resolution".
 3. Optional: measure packed vs unpacked textures on one unit (memory, time). Expected: packed images always sit in RAM (compressed) and cannot use the texture cache.
 - User side: bake with BlenderKit and Megascans Plugin disabled to find the console "Python context internal state bug"; check the 92 units' resolutions changed by the old ÷2/×2.
 
-## Planned next: bake resolution vs export resolution (agreed 2026-09-28, not started)
+## Bake Resolution and export at unit resolution (2026-09-28)
 
-The user's SimpleBake habit, automated: bake decides the light, export decides the budget (Vision Pro ~8 GB per app, mostly textures).
-- **Project Settings: Bake Resolution** (default 4096). Every unit bakes at it (times the Test share) and is denoised there. This replaces the Bake at 4K checkbox.
-- **Master files:** the full-size denoised Beauty PNG is kept on disk (own folder) per unit and state.
-- **Export copy:** derived from the master at the unit's resolution (downscale in linear light, existing `downscale_staged_beauty`). Blender's generated materials show this copy (what you see is what ships; 250 masters at 4K would be ~16 GB in Material Preview) and USDZ/GLB embed it. The Mac side is unchanged.
-- **Changing a unit's resolution** re-derives its copy from the master; the unit stays Ready, no rebake.
-- **Open decisions:** test bakes (25–50%) must not overwrite masters (separate place, or marked and replaced by the next full bake); when copies regenerate (on resolution change and/or at export); how the unit status shows master vs export size.
-- **Cost estimate for UniPlace:** bake time ~1.8x (about 16 h to 29 h for both states at 256 samples); downscaled units could use fewer samples. Masters ~15 MB each, ~7.5 GB for both states.
+The user's SimpleBake habit, automated: bake decides the light, export decides the budget (Vision Pro ~8 GB per app, mostly textures). Decisions by the user: one file per unit and state (a test bake overwrites it like any bake; tests come before finals), Blender shows the baked size, export scales, colour must not change.
+- `project.bake_resolution` (Project Settings, default 4096) replaces the Bake at 4K checkbox. `bake_size()` = max(Bake Resolution, unit resolution) times the Test share. The Beauty PNG keeps that size (no downscale at bake); `day/evening_baked_resolution` record it. The margin is scaled to keep its width at the unit's resolution (`ceil(margin * bake / export)`).
+- Export: `export.ExportTextures` writes, once per export run, a copy of every Beauty atlas that is larger than its unit's resolution (`bake_files.scale_atlas`: linear light, exact area average for any ratio, 8-bit PNG written without colour management) into a temp folder under the baked file's name, points the image at it while each layer is written, then back at the baked file. Baked files and the Blender images are unchanged; the log line "Atlases scaled to unit resolution: N x 4096 to 1024" lists them.
+- A unit's resolution can go down, or back up to the baked size, without a rebake; above the baked size the status shows "Ready 1K (Setup 2K)" and export warns (as for test bakes).
+- Colour: every scaled pixel equals the exact linear-light average rounded to 8 bits; the image mean moves by the rounding only (about 0.0005 linear, under 0.1 of an 8-bit step). Black/white pixels average to code 188 (half the light), not 128.
+- Lightmap keeps baking at the unit's resolution (`lightmap_resolution()`); not in production.
+- Material Preview now loads the baked size (4K): about 64 MB per atlas in RAM and VRAM. If the viewport gets heavy, Blender's Preferences > Viewport > Texture Limit Size caps it without touching the files.
+- Regression: `tests/blender_resolution_smoke.py` (1024 bake of a 256 unit; USDZ and GLB atlases at 256/512/1024 with the same mean light; baked file hash and image path unchanged; 2048 above the baked size warns; 25% test bake; scaler checks: flat colour at 3:2, black/white checker, noisy mean). Baking tests set `bake_resolution = '256'` so units bake at their own size.
+- Existing UniPlace atlases were saved at unit size (old behaviour); they export as they are. Units rebaked from now on keep 4K.
 
-## Audit follow-ups not changed
-
-- Export Original children of a baked parent keep the source parent as a transform-only USD Xform; GLB flattens them to the root. World transforms are correct in both.
-- Generated objects are named after their source at creation (`Name.001`) and keep that name after the source is renamed; exported prim names follow the generated object.
-- Memory, measured on an RTX 3090 (OptiX, 24 Beauty bakes of 4K units): VRAM stayed flat between units (about +1.2 GB over idle, peak 5.9 GB during a bake). Process RAM grew about 0.5 GB per 4K unit and levelled off near 13 GB by the 24th bake. Per-stage measurement places the growth at the Beauty denoise step; the denoise alone does not grow in isolation, and freeing the committed image buffers did not change it. Not investigated further; watch RAM in Task Manager during the first long 8K queue.
-
-## Unified layer taxonomy
-
-- One authoritative `layer_type` drives both runtime meaning and Blender bake/export behavior; there is no parallel processing-profile entity.
-- Types are Unlit, PBR, Alpha, Translucent, Glass, Emissive, and Runtime.
-- Behavior: Unlit/Translucent bake unlit Beauty; PBR preserves PBR channels; Alpha preserves Alpha; Glass/Emissive/Runtime export originals.
-- New projects initialize these seven general layers instead of the project-specific Scene/Reflect/Translusent/Curtains/Homepod set.
-- Video surfaces are runtime-driven content and belong under `Runtime/FX`; `Runtime/SFX` is reserved for sound-effect placement points. Emissive and Skybox remain distinct visual outputs.
-- The model was not yet in production, so no legacy schema or migration layer is retained.
-- Generated objects, materials, and images store the flat `pmvr_layer_type` custom property. Runtime source metadata still needs a manifest or export proxy for a uniform Mac-side contract.
-- Cameras are now included by both USDZ and GLB exporters, allowing Runtime layers to carry probe-camera transforms directly.
-
-## Implemented, awaiting live-scene feedback
-
-- Scene Debug now lives only in Optimize. UV Health, Texel Density, Checker, Scale, and Linked Meshes work on all visible scene meshes before project initialization; Bake Status, Render Layers, and Bake Units unlock after Initialize.
-- Bake isolation now excludes every active View Layer instance of `PMVR_GENERATED`, restores its previous state after success/failure/cancellation, and keeps per-object `hide_render` as a fallback.
-- Setup list selection follows the active viewport object through a deferred Blender message-bus update. Registered sources and generated outputs resolve to their semantic render layer and bake unit; Export Original resolves only to its layer.
-- Bake-unit batch selection now uses native independent Bool checkboxes. Every checkbox can be cleared, LMB-drag selection is available, and resolution propagation remains limited to checked units in the same render layer.
-
-## Removed after live-scene feedback
-
-- The synchronized Base Color/Roughness/Alpha texture preview was removed. Updating every material in a real scene made the interaction too slow to be useful.
-
-## Retired material checker
-
-- The former Optimize Global/Selected Checker and all bake/export suspension hooks were removed after the GPU Checker replaced them.
-- On load, legacy slot-state data is used once to restore original materials and remove unused PMVR_CheckerPreview materials. Only the shared A1-H8 image and tiling property remain for GPU diagnostics.
-
-## Viewport pipeline overlay
-
-- The Setup and Bake stages offer non-destructive GPU diagnostics without changing materials, object colors, or viewport shading. The renderer uses cached bulk mesh buffers and a sub-pixel fragment-depth offset for transparent exact-surface fills; it does not scale or displace geometry.
-- Bake Status colors source meshes as Missing, Existing, baked This Session, No Bake, or Unassigned for the active Day/Evening and Beauty/Lightmap combination.
-- Render Layers uses persistent user-editable colors stored per semantic layer. Existing layers receive distinct palette colors when the add-on loads. Unassigned meshes are hidden by default and can be revealed as restrained amber warnings.
-- Session bake state is held only in memory, marked after a successful commit, and cleared when another blend file is loaded.
-- Scene Debug starts with Ctrl+Shift+D, Start Debug, or a choice from the compact Mode dropdown. While active, keys 1-8 select Bake Status, Render Layers, Bake Units, UV Health, Texel Density, Checker, Scale Check, and Linked Meshes; bracket keys cycle modes and Esc exits. All unrelated events pass through to Blender. The lower-left HUD includes the controls.
-- UV Health validates the reserved first two UV channels (UVMap, SimpleBake). Invalid bake-capable meshes are red, valid meshes green, and explicit Export Original meshes muted.
-- Texel Density and automatic unit setup now share one canonical area calculation. It evaluates only UV channel index 1 (the second channel), which must be named SimpleBake, against evaluated world-space mesh area and the scene unit scale. Objects in a valid bake unit use that unit's resolution; objects not yet added to the pipeline use Default Unit Resolution. The diagnostic is discrete and monotonic: green is Great at or above target, yellow is Acceptable from 0.5x target up to target, red is below 0.5x target, and missing/invalid UV or geometry data is magenta. The HUD shows exact px/cm and resolution for the active source object.
-- Checker is a GPU-only Scene Debug channel on key 6. It uses the shared A1-H8 asset without changing materials, defaults to the second SimpleBake UV channel, can switch to the first UVMap channel, and reuses the existing checker tiling setting. Sampling is quantized to each object's bake-unit resolution (or the project default), making 512/2K/4K previews visibly resolution-aware when viewed closely. Missing selected UV channels are magenta.
-- Bake Units assigns a stable deterministic color to each unit, so grouped source objects are visible directly in the scene. Scale Check fills only meshes whose local scale is not 1/1/1. Linked Meshes fills only objects whose mesh datablock has multiple users.
-- Scene Debug mode is session-only and is forced Off whenever a blend file loads, so a saved active overlay cannot leave an orphaned HUD without its modal controller.
-
-## Audit scope
-
-- The working Audit checks bake-preparation concerns: shared mesh data, reserved UV channels, and unapplied scale. Multiple input materials are valid and no longer reported as an error.
-- Customer naming conventions are intentionally separate behind Check Names. They are not part of pipeline identity; source/layer/unit relationships use stable IDs.
-
-## Material output contract
-
-- Scene / Beauty units now create one state-specific material per bake unit and reuse it only among generated members of that unit.
-- PBR and Alpha still preserve source-specific Roughness/Normal/Alpha branches and therefore can currently produce more than one generated material. Reaching the strict one-unit/one-material export contract for those types requires unit-atlas generation for the preserved channels; do not collapse these slots destructively.
-
-## Deliberately deferred engineering work
-
-- Grouped-unit texel density is calculated correctly per member at the shared unit resolution, but the diagnostic does not yet detect UV overlap between different objects packed into that unit.
 - Scene Debug currently has one modal-controller state for the Blender process. This is reliable for the normal single-window workflow; true simultaneous multi-window debug sessions would need window-scoped controller state.
 - `pipeline/viewport_overlay.py` intentionally remains one module until the diagnostic engine settles. Split rendering/cache code from mode classifiers only after the real-scene test, so the refactor does not obscure functional regressions.
 
 ## Resolution (2026-09-28)
 
 - 8192 removed everywhere (pipeline and legacy Lightmap Baker); stored enum value 5 is capped to 4096 on load/register (`cap_removed_resolutions`).
-- The ÷2/×2 buttons rewrote every queued unit's Setup resolution, with no way back. Replaced by `project.test_resolution` (100/75/50/25%, reset to 100% on load): `bake_resolution()` scales only what the queue bakes. Units record `day/evening_baked_resolution`; the unit status shows a result below Setup and export warns about it.
+- The ÷2/×2 buttons rewrote every queued unit's Setup resolution, with no way back. Replaced by `project.test_resolution` (100/75/50/25%, reset to 100% on load): the test share scales only what the queue bakes (now `bake_size()`, a share of the Bake Resolution). Units record `day/evening_baked_resolution`; the unit status shows a result below Setup and export warns about it.
 - Regression: `tests/blender_resolution_smoke.py` (real 25% bake writes a 64 px PNG for a 256 unit, Setup unchanged, export warning, 100% rebake clears it, reopen resets).

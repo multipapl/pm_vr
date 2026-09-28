@@ -15,7 +15,7 @@ from .scenarios import Scope, active_scenario, switched_off_count
 from .setup_ops import (
     active_layer,
     active_unit,
-    bake_resolution,
+    queue_bake_size,
     baked_resolution,
     test_resolution_label,
     unassigned_visible_objects,
@@ -96,9 +96,8 @@ class PMVR_UL_BakeQueue(bpy.types.UIList):
         right.prop(unit, "bake_scenario", text="")
         resolution = right.row(align=True)
         resolution.ui_units_x = 1.6
-        # The size the queue will bake at; red while a test resolution is on.
-        resolution.alert = bool(test_resolution_label(context.scene.pm_vr_project))
-        resolution.label(text=short_resolution(bake_resolution(context.scene.pm_vr_project, unit)))
+        # The size the unit ships at; the bake size is shown under the list.
+        resolution.label(text=short_resolution(int(unit.resolution)))
 
 
 class PMVR_UL_BakeScenarios(bpy.types.UIList):
@@ -355,7 +354,12 @@ def draw_bake(layout, context):
     test_resolution.alert = bool(test)
     test_resolution.label(text="Test:")
     test_resolution.prop(project, "test_resolution", expand=True)
-    queue.prop(project, "bake_at_max_resolution", text="Bake at 4K, save at unit size")
+    sizes = queue.row()
+    sizes.alert = bool(test)
+    sizes.label(
+        text=f"Bakes at {short_resolution(queue_bake_size(project))}; export scales to unit size",
+        icon='IMAGE_DATA',
+    )
     states = queue.row(align=True)
     states.label(text="Bake for:")
     states.prop(project, "bake_day", text="Day")
@@ -473,7 +477,8 @@ HELP_SECTIONS = (
         "A lighting state switches on with all its nested collections",
         "Modifiers must not add or remove material slots",
         "Esc or Cancel Bake: stops the queue, current unit discarded",
-        "Bake at 4K: bakes 4096, saves at unit size (sharper, slower)",
+        "Bake Resolution (Project Settings): size of the baked files",
+        "Unit resolution can change after a bake: no rebake needed",
         "Layers and units are locked while baking",
     )),
     ("Bake scenarios", 'OUTLINER_COLLECTION', (
@@ -489,6 +494,7 @@ HELP_SECTIONS = (
     )),
     ("Export", 'EXPORT', (
         "Every unit needs a Ready Beauty for the active state",
+        "Atlases scale to unit resolution (linear light, colour kept)",
         "Day and Evening must have matching structure",
         "Additional exports: same layer type only",
         "Selection and visibility are ignored: all assigned objects export",
