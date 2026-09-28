@@ -4,9 +4,15 @@ import bpy
 
 from .bake_scene import PipelineBakeError
 from .constants import BAKE_LAYER_TYPES
-from .identity import extra_export_members, find_layer, find_unit, layer_members, unit_members
+from .identity import (
+    extra_export_members,
+    find_unit,
+    layer_members,
+    unit_members,
+    units_with_members,
+)
 from .scenarios import Scope, active_scenario, switched_off_count
-from .setup_ops import active_layer, active_unit
+from .setup_ops import active_layer, active_unit, unassigned_visible_objects
 
 
 def draw_state_switch(layout, project):
@@ -31,6 +37,13 @@ class PMVR_UL_RenderLayers(bpy.types.UIList):
         row.label(text=item.bl_rna.properties["layer_type"].enum_items[item.layer_type].name)
 
 
+# Lightmap bake is kept but not in production use yet; True shows its controls.
+SHOW_LIGHTMAP = False
+
+# Units with at least one member, collected once per panel draw for the list rows.
+_OCCUPIED_UNITS = set()
+
+
 class PMVR_UL_BakeUnits(bpy.types.UIList):
     def filter_items(self, context, data, propname):
         units = getattr(data, propname)
@@ -43,8 +56,11 @@ class PMVR_UL_BakeUnits(bpy.types.UIList):
 
     def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index):
         row = layout.row(align=True)
+        empty = item.unit_id not in _OCCUPIED_UNITS
         row.prop(item, "batch_selected", text="")
-        row.prop(item, "display_name", text="", emboss=False, icon='UV')
+        name = row.row(align=True)
+        name.alert = empty
+        name.prop(item, "display_name", text="", emboss=False, icon='ERROR' if empty else 'UV')
         row.prop(item, "resolution", text="")
 
 
@@ -109,7 +125,15 @@ def draw_setup(layout, context):
 
     draw_state_switch(layout, project)
     layers = layout.box()
-    layers.label(text="Render Layers", icon='RENDERLAYERS')
+    header = layers.row(align=True)
+    header.label(text="Render Layers", icon='RENDERLAYERS')
+    unassigned = len(unassigned_visible_objects(context))
+    op = header.operator(
+        "pmvr.select_pipeline_items",
+        text=f"Unassigned: {unassigned}",
+        icon='RESTRICT_SELECT_OFF',
+    )
+    op.target = 'UNASSIGNED'
     row = layers.row()
     row.template_list("PMVR_UL_RenderLayers", "", project, "render_layers", project, "active_render_layer_index", rows=5)
     controls = row.column(align=True)
@@ -125,47 +149,30 @@ def draw_setup(layout, context):
         formats = detail.row(align=True)
         formats.prop(layer, "export_usdz", toggle=True)
         formats.prop(layer, "export_glb", toggle=True)
-        if layer.layer_type in BAKE_LAYER_TYPES:
-            # Unbaked objects (empties, helpers) that belong to a baked layer.
-            assign = detail.row(align=True)
-            op = assign.operator("pmvr.assign_selected_to_layer", text="Export Original", icon='OBJECT_DATA')
-            op.role = 'EXPORT_ORIGINAL'
-            assign.operator("pmvr.unassign_selected", text="Unassign", icon='X')
         nav = detail.row(align=True)
         op = nav.operator("pmvr.select_pipeline_items", text=f"Select {len(layer_members(layer.layer_id))} Sources")
         op.target = 'LAYER_SOURCES'
 
     if layer and layer.layer_type not in BAKE_LAYER_TYPES:
-        draw_original_objects(layout, layer)
+        draw_original_objects(layout, layer, layer_members(layer.layer_id))
     else:
         draw_bake_units(layout, project)
-
-    selected = context.active_object
-    if selected and hasattr(selected, "pm_vr_pipeline") and selected.pm_vr_pipeline.is_registered_source:
-        meta = selected.pm_vr_pipeline
-        selected_box = layout.box()
-        selected_box.label(text=f"Active Source: {selected.name}", icon='OBJECT_DATA')
-        selected_layer = find_layer(project, meta.render_layer_id)
-        selected_unit = find_unit(project, meta.bake_unit_id)
-        selected_box.label(text=f"Layer: {selected_layer.display_name if selected_layer else 'Unassigned'}")
-        selected_box.label(text=f"Role: {meta.bl_rna.properties['processing_role'].enum_items[meta.processing_role].name}")
-        if meta.processing_role == 'BAKE':
-            selected_box.label(text=f"Unit: {selected_unit.display_name if selected_unit else 'Missing'}")
-        extra_names = [
-            target.display_name
-            for entry in meta.extra_export_layers
-            if (target := find_layer(project, entry.layer_id))
+        # Unbaked objects in a baked layer are no longer added from Setup;
+        # older files may still have some, so they stay visible and removable.
+        originals = [
+            obj for obj in (layer_members(layer.layer_id) if layer else [])
+            if obj.pm_vr_pipeline.processing_role == 'EXPORT_ORIGINAL'
         ]
-        if extra_names:
-            selected_box.label(text=f"Also exports to: {', '.join(extra_names)}", icon='EXPORT')
+        if originals:
+            draw_original_objects(layout, layer, originals, can_add=False)
 
 
-def draw_original_objects(layout, layer):
+def draw_original_objects(layout, layer, objects, can_add=True):
     """Glass, Emissive and Runtime are not baked and have no units: the same
-    place lists the layer's objects, and + adds the selection as originals."""
+    place lists the layer's objects; + adds the selection, - takes it out."""
     box = layout.box()
-    box.label(text="Objects", icon='OBJECT_DATA')
-    members = sorted(layer_members(layer.layer_id), key=lambda obj: obj.name.casefold())
+    box.label(text="Objects" if can_add else "Unbaked Objects", icon='OBJECT_DATA')
+    members = sorted(objects, key=lambda obj: obj.name.casefold())
     row = box.row()
     names = row.box().column(align=True)
     for obj in members[:8]:
@@ -175,16 +182,27 @@ def draw_original_objects(layout, layer):
     if not members:
         names.label(text="No objects yet")
     controls = row.column(align=True)
-    op = controls.operator("pmvr.assign_selected_to_layer", text="", icon='ADD')
-    op.role = 'EXPORT_ORIGINAL'
+    if can_add:
+        op = controls.operator("pmvr.assign_selected_to_layer", text="", icon='ADD')
+        op.role = 'EXPORT_ORIGINAL'
     op = controls.operator("pmvr.unassign_selected", text="", icon='REMOVE')
-    op.active_layer_only = True
+    op.layer_originals_only = True
     box.label(text="Not baked: exported as they are.", icon='INFO')
 
 
 def draw_bake_units(layout, project):
+    occupied = units_with_members()
+    _OCCUPIED_UNITS.clear()
+    _OCCUPIED_UNITS.update(occupied)
     units = layout.box()
     units.label(text="Bake Units", icon='UV')
+    empty = sum(1 for unit in project.bake_units if unit.unit_id not in occupied)
+    if empty:
+        warning = units.row(align=True)
+        label = warning.row(align=True)
+        label.alert = True
+        label.label(text=f"{empty} empty unit(s)", icon='ERROR')
+        warning.operator("pmvr.remove_empty_units", text="Remove", icon='TRASH')
     row = units.row()
     row.template_list("PMVR_UL_BakeUnits", "", project, "bake_units", project, "active_bake_unit_index", rows=5)
     controls = row.column(align=True)
@@ -199,13 +217,17 @@ def draw_bake_units(layout, project):
         detail = units.column(align=True)
         detail.prop(unit, "display_name")
         detail.prop(unit, "bake_scenario", text="Scenario")
-        detail.label(text=f"Members: {len(unit_members(unit.unit_id))}")
+        members = detail.row(align=True)
+        members.label(text=f"Members: {len(unit_members(unit.unit_id))}")
+        members.operator("pmvr.assign_selected_to_unit", text="", icon='ADD')
+        members.operator("pmvr.remove_selected_from_unit", text="", icon='REMOVE')
         status_row = detail.row(align=True)
         status_row.label(text=f"Beauty D: {unit.day_status or '—'}")
         status_row.label(text=f"E: {unit.evening_status or '—'}")
-        lightmap_row = detail.row(align=True)
-        lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
-        lightmap_row.label(text=f"E: {unit.evening_lightmap_status or '—'}")
+        if SHOW_LIGHTMAP:
+            lightmap_row = detail.row(align=True)
+            lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
+            lightmap_row.label(text=f"E: {unit.evening_lightmap_status or '—'}")
         row = detail.row(align=True)
         op = row.operator("pmvr.select_pipeline_items", text="Select Sources")
         op.target = 'UNIT_SOURCES'
@@ -283,7 +305,9 @@ def draw_bake(layout, context):
     states.label(text="Bake:")
     states.prop(project, "bake_day", text="Day", icon='LIGHT_SUN', toggle=True)
     states.prop(project, "bake_evening", text="Evening", icon='LIGHT', toggle=True)
-    layout.prop(project, "bake_mode", expand=True)
+    if SHOW_LIGHTMAP or project.bake_mode != 'BEAUTY':
+        # A file left in Lightmap mode keeps the switch so it can go back.
+        layout.prop(project, "bake_mode", expand=True)
     draw_scenarios(layout, context, project)
     queue = layout.box()
     mode_label = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
@@ -324,11 +348,7 @@ def draw_bake(layout, context):
     row = preview.row(align=True)
     row.prop(project, "show_sources", toggle=True)
     row.prop(project, "show_generated", toggle=True)
-    preview.operator("pmvr.apply_preview_visibility", icon='FILE_REFRESH')
-    nav = preview.row(align=True)
-    op = nav.operator("pmvr.select_pipeline_items", text="Active Unit Sources")
-    op.target = 'UNIT_SOURCES'
-    op = nav.operator("pmvr.select_pipeline_items", text="Select Baked Output")
+    op = preview.operator("pmvr.select_pipeline_items", text="Select Baked Output", icon='RESTRICT_SELECT_OFF')
     op.target = 'UNIT_GENERATED'
 
 
@@ -397,7 +417,11 @@ HELP_SECTIONS = (
     )),
     ("Scene", 'OUTLINER_COLLECTION', (
         "Assigned objects: inside Source Root",
-        "Glass, Emissive, Runtime: + adds objects unbaked",
+        "Unassigned: N selects visible objects without a layer",
+        "Lists: + adds the selection, - takes it out of the layer",
+        "+ moves objects from other layers; Shift+ merges one unit",
+        "Unit Members +/-: add or remove selected objects of a unit",
+        "Glass, Emissive, Runtime: objects export unbaked",
         "PMVR_GENERATED, PMVR_WORK: managed by PM VR, keep yours out",
         "Shift+D, Alt+D, copy/paste: the copy gets its own ID",
         "Copy of a baked object: same layer, needs its own unit",
@@ -428,7 +452,8 @@ HELP_SECTIONS = (
         "Every unit needs a Ready Beauty for the active state",
         "Day and Evening must have matching structure",
         "Additional exports: same layer type only",
-        "Selection is ignored",
+        "Selection and visibility are ignored: all assigned objects export",
+        "Only inside Evening lighting collection: Evening export only",
     )),
 )
 

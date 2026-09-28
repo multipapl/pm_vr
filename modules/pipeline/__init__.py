@@ -34,6 +34,7 @@ def _load_post(_filepath):
             "(render visibility, generated collection, work data, scenario collections)",
         )
     identity.remember_identity_owners()
+    setup_ops.release_roleless_members()
 
 
 def _separate_copies(force):
@@ -78,6 +79,7 @@ def register():
     try:
         identity.remember_identity_owners()
         generated.protect_all_generated_materials()
+        setup_ops.release_roleless_members()
     except AttributeError:
         # bpy.data is restricted while add-ons register at startup; the
         # load_post handler covers the file that is opened next.

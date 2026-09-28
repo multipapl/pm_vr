@@ -96,6 +96,18 @@ def unit_members(unit_id):
     ]
 
 
+def units_with_members():
+    """IDs of units that have at least one Bake member, in one pass over objects."""
+    return {
+        obj.pm_vr_pipeline.bake_unit_id
+        for obj in bpy.data.objects
+        if hasattr(obj, "pm_vr_pipeline")
+        and obj.pm_vr_pipeline.is_registered_source
+        and obj.pm_vr_pipeline.processing_role == 'BAKE'
+        and obj.pm_vr_pipeline.bake_unit_id
+    }
+
+
 def sources_by_id():
     """Map stable source IDs to registered source objects."""
     return {

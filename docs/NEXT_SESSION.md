@@ -30,6 +30,28 @@
 - The queue refuses to start (and Validate Pipeline reports) when a scenario would switch off a unit's own members; members hidden by the lighting state, their own render toggle or an unrecorded collection keep the usual skip behavior. Unrecorded collections keep their outliner state and are logged once per queue.
 - Verified: `tests/blender_bake_scenarios_smoke.py` (a counter shadowed by a canopy in Bedroom bakes at 0.007 mean brightness without the Kitchen scenario and 0.658 with it; exact restore; mid-bake save recovery) and `tests/blender_gui_bake_scenarios.py` (real modal queue: refused start, collection states sampled during each Cycles job, restore after finish and after Esc).
 
+## Unit list fixes (2026-09-28, from the UniPlace log)
+
+- `active_unit()` wrote `active_bake_unit_index` when the index pointed at another layer's unit; from a panel or `poll()` Blender refuses the write, so the Setup panel raised and Remove Unit was disabled. It is read-only now: an index on another layer's unit means no active unit. Removing a unit makes its nearest neighbour of the same layer active (it used to take whatever unit followed in the shared collection).
+- Unassign (and Remove from Unit, reassigning to another layer/unit) left units with no members in the list; giving the same objects new units then showed duplicate names. A unit left without members by these operators is removed with its generated data (not while a bake runs). Units emptied otherwise (objects deleted) are flagged red with a Remove Empty Units button.
+- Regression: `tests/blender_gui_unit_list.py` (window; the panel draw is recorded, not just operator results).
+
+## Setup simplification (2026-09-28, chosen by the user)
+
+- Every list's `-` takes objects fully out of the layer (no layer, unit, role or additional exports). Before, removing a unit left its objects in the layer with role Unassigned, which failed validation and export and needed the Unassign button as a second step. Such leftovers are released on load/register (`release_roleless_members`).
+- Removed from Setup: Export Original and Unassign buttons (unbaked objects live in Glass/Emissive/Runtime lists; older Export Original objects in baked layers are still listed with `-`), and the Active Source box (the lists follow the selection). Unit detail has Members `+`/`-`.
+- `+` in a baked layer moves objects from other layers or units (units left empty disappear); objects already in a unit of this layer are left alone. Shift+ merges the selection into one shared unit, including objects that had units.
+- Bake preview: Show Sources / Show Generated apply at once (Apply Preview removed from the UI; the operator stays for scripts), and the Day/Evening button binds the state's materials on baked results. Hidden objects outside the View Layer no longer raise. "Active Unit Sources" was removed (same as Setup's Select Sources).
+- Lightmap controls are hidden (`SHOW_LIGHTMAP` in `pipeline/ui.py`); a file left in Lightmap mode still shows the mode switch.
+- Setup header **Unassigned: N** selects visible objects inside Source Root without a layer (lights excluded); the old UNASSIGNED target selected every roleless object in the file, including hidden ones and generated copies.
+
+## Export independent of visibility (2026-09-28)
+
+- `resolve_layer_objects` no longer filters by render visibility. Before, objects in disabled collections or with the render toggle off were silently left out of USDZ/GLB, and a unit that exists only in Evening blocked the Day export ("Day Beauty is not ready"). Now every assigned object exports; the only state rule is `other_state_objects()`: objects that live only inside the other state's lighting collection are left out.
+- The USD exporter (evaluation mode RENDER) drops render-disabled objects; their camera toggle is switched on only while the file is written and restored in `finally`. H-hidden and Disable-in-Viewports objects were already exported by both exporters.
+- Bake still follows the outliner: a unit whose members are all hidden is skipped (counted as skipped), and its export then fails loudly as not ready.
+- Regression: `tests/blender_export_visibility_smoke.py` (USDZ prims and GLB nodes checked per state; visibility compared before/after).
+
 ## Audit follow-ups not changed
 
 - Export Original children of a baked parent keep the source parent as a transform-only USD Xform; GLB flattens them to the root. World transforms are correct in both.

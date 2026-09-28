@@ -26,11 +26,19 @@ survives a crash; Project Settings shows the path and opens the folder. The last
 
 Initialize the project, configure Source Root plus Day/Evening collections and
 worlds, then create semantic render layers. A render layer's name is also its
-export filename stem. Assign non-baked geometry and empties as `Export Original`.
+export filename stem.
 
 With a render layer active, click `+` to turn every selected mesh into a separate
 bake unit; Shift-click `+` to create one shared-atlas unit from the selection.
-The unit list shows only the active layer. Checkbox-select multiple rows with
+`+` takes objects from other layers or units as they are (a unit left without
+objects disappears), so moving objects never needs a separate remove step;
+Shift-click `+` also merges existing units into one. `-` removes the highlighted
+unit and takes its objects out of the layer; **Members** `+`/`-` edit a shared
+unit. Glass, Emissive and Runtime layers are not baked: they list their objects
+instead of units, and `+`/`-` add or remove the selection.
+The unit list shows only the active layer. **Unassigned: N** in the Render
+Layers header selects the objects visible now inside Source Root that belong
+to no layer (lights excluded), to find what is still left to set up. Checkbox-select multiple rows with
 Shift and changing one selected resolution applies it to that batch only. Select
 any unit member and use **Add Selected Units** in Bake—the complete unit is queued
 and duplicates are ignored.
@@ -106,6 +114,13 @@ temporarily shows the exported state's materials and restores the viewport
 preview afterwards. A baked child whose parent is baked in another unit of the
 same layer stays parented to that generated parent.
 
+Export follows the setup, not the file's current visibility: objects in
+disabled collections, with the render toggle off, hidden with H or behind
+Show Generated off are all exported, and the file's visibility is unchanged
+afterwards. The only state-specific rule is the lighting collections: an
+object that lives only inside the Evening collection is exported in Evening
+and left out of Day (and the other way round).
+
 To include a source object in another layer's export file, open **Export**,
 select the destination layer, select the source objects in the viewport, and
 click **Include Selected**. The box lists additional objects in that file;
@@ -118,7 +133,8 @@ materials/textures; no separate manifest is generated.
 
 Lightmap uses the same unit queue and shared atlas, but produces separate
 scene-linear EXR images and generated objects/materials. Switching modes never
-overwrites the other mode's artifacts.
+overwrites the other mode's artifacts. Its controls are hidden while it is not
+in production use (`SHOW_LIGHTMAP` in `pipeline/ui.py`).
 
 ## Legacy tools
 

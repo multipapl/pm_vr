@@ -17,7 +17,6 @@ from .generated import (
 from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem
 from . import log
 from .state import activate_state
-from .validation import object_render_visible
 
 
 class PipelineExportError(RuntimeError):
@@ -59,6 +58,21 @@ def _unit_ready(unit, state):
     return True, ""
 
 
+def other_state_objects(project, state):
+    """Pointers of objects that live only inside the other state's lighting
+    collection (evening-only lamps, say). They are the only objects a state's
+    export leaves out: export follows the setup, not what happens to be
+    visible, excluded or render-disabled in the file."""
+    other = project.evening_lighting_collection if state == 'DAY' else project.day_lighting_collection
+    if not other:
+        return set()
+    inside = {other.name_full, *(collection.name_full for collection in other.children_recursive)}
+    return {
+        obj.as_pointer() for obj in other.all_objects
+        if all(collection.name_full in inside for collection in obj.users_collection)
+    }
+
+
 def resolve_layer_objects(context, layer):
     project = context.scene.pm_vr_project
     state = project.active_lighting_state
@@ -66,7 +80,10 @@ def resolve_layer_objects(context, layer):
     seen = set()
     bound_units = set()
     generated_index = _generated_beauty_index()
+    skipped = other_state_objects(project, state)
     for source in export_layer_members(layer.layer_id):
+        if source.as_pointer() in skipped:
+            continue
         metadata = source.pm_vr_pipeline
         if not metadata.source_id:
             raise PipelineExportError(f'{source.name}: registered source has no ID')
@@ -79,7 +96,7 @@ def resolve_layer_objects(context, layer):
         if metadata.processing_role == 'UNASSIGNED':
             raise PipelineExportError(f'{source.name}: role is Unassigned')
         if metadata.processing_role == 'EXPORT_ORIGINAL':
-            if object_render_visible(source, context.view_layer) and source.as_pointer() not in seen:
+            if source.as_pointer() not in seen:
                 resolved.append(source)
                 seen.add(source.as_pointer())
             continue
@@ -95,8 +112,6 @@ def resolve_layer_objects(context, layer):
             except PipelineBakeError as exc:
                 raise PipelineExportError(f'{unit.display_name}: {exc}') from exc
             bound_units.add(unit.unit_id)
-        if not object_render_visible(source, context.view_layer):
-            continue
         generated = _generated_for_source(source, unit.unit_id, generated_index)
         if not generated:
             raise PipelineExportError(f'{source.name}: generated Beauty object is missing')
@@ -152,12 +167,21 @@ def export_semantic_layer(context, layer, format_name):
     try:
         objects = resolve_layer_objects(context, layer)
         if not objects:
-            return "SKIPPED", "no visible objects for active state"
+            return "SKIPPED", "no objects for the active state"
         final_path = _export_path(project, layer, project.active_lighting_state, format_name)
         folder, temporary_path = _temporary_export_path(final_path)
         assembly = _make_assembly(context.scene, layer, objects)
         exporter = collection_export.export_usdz if format_name == 'USDZ' else collection_export.export_glb
-        result = exporter(assembly, temporary_path)
+        # The USD exporter evaluates for render and drops render-disabled
+        # objects; the camera toggle is a working state, not a setup choice.
+        render_disabled = [obj for obj in objects if obj.hide_render]
+        try:
+            for obj in render_disabled:
+                obj.hide_render = False
+            result = exporter(assembly, temporary_path)
+        finally:
+            for obj in render_disabled:
+                obj.hide_render = True
         if 'CANCELLED' in result:
             raise PipelineExportCancelled(f"{format_name} export was cancelled")
         if 'FINISHED' not in result or not os.path.exists(temporary_path):

@@ -25,6 +25,26 @@ def _overlay_updated(_owner, _context):
     viewport_overlay.tag_redraw()
 
 
+def _show_sources_changed(project, _context):
+    from .setup_ops import preview_sources
+
+    preview_sources(project)
+
+
+def _show_generated_changed(project, _context):
+    from .setup_ops import preview_generated
+
+    preview_generated(project)
+
+
+def _bake_mode_changed(project, context):
+    from .setup_ops import preview_generated, preview_state
+
+    preview_state(project)
+    preview_generated(project)
+    _overlay_updated(project, context)
+
+
 def _layer_type_changed(layer, context):
     scene = getattr(context, "scene", None)
     project = getattr(scene, "pm_vr_project", None) if scene else None
@@ -369,7 +389,7 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         name="Bake Mode",
         items=MODE_ITEMS,
         default='BEAUTY',
-        update=_overlay_updated,
+        update=_bake_mode_changed,
     )
     overlay_mode: bpy.props.EnumProperty(
         name="Viewport Overlay",
@@ -429,8 +449,18 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     active_bake_scenario_index: bpy.props.IntProperty(default=0, min=0)
     show_bake_scenarios: bpy.props.BoolProperty(name="Bake Scenarios", default=True)
 
-    show_sources: bpy.props.BoolProperty(name="Show Sources", default=True)
-    show_generated: bpy.props.BoolProperty(name="Show Generated", default=True)
+    show_sources: bpy.props.BoolProperty(
+        name="Show Sources",
+        description="Show the source objects in the viewport",
+        default=True,
+        update=_show_sources_changed,
+    )
+    show_generated: bpy.props.BoolProperty(
+        name="Show Generated",
+        description="Show the baked results of the current bake mode in the viewport",
+        default=True,
+        update=_show_generated_changed,
+    )
     last_validation_summary: bpy.props.StringProperty(name="Validation Summary", options={'SKIP_SAVE'})
     last_operation_summary: bpy.props.StringProperty(name="Operation Summary", options={'SKIP_SAVE'})
     operation_running: bpy.props.BoolProperty(default=False, options={'SKIP_SAVE'})
