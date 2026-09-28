@@ -100,6 +100,11 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 - Regression: `tests/blender_resolution_smoke.py` (1024 bake of a 256 unit; USDZ and GLB atlases at 256/512/1024 with the same mean light; baked file hash and image path unchanged; 2048 above the baked size warns; 25% test bake; scaler checks: flat colour at 3:2, black/white checker, noisy mean). Baking tests set `bake_resolution = '256'` so units bake at their own size.
 - Existing UniPlace atlases were saved at unit size (old behaviour); they export as they are. Units rebaked from now on keep 4K.
 
+## Ideas from the user (2026-09-29, not started)
+
+- UV adequacy check for all bake units, by rasterising each unit's SimpleBake triangles at the bake size: overlaps between islands and folded faces inside one, gaps below the island padding (dilate each island by padding x size), outside 0-1, zero-area and flipped faces, stretch (UV vs 3D area), texel density spread, atlas fill. A "check all units" list plus a Scene Debug highlight next to UV Health.
+- Automatic packing of every unit onto the SimpleBake channel with the project's island padding: UVPackmaster through its Python operators when installed (the user likes its heuristic packing), Blender's packer otherwise. Seams stay manual. A home-grown heuristic packer is a separate, large project.
+
 ## UniPlace export test (2026-09-28, 50% test bake, read-only, scratch folder)
 
 - Bake signatures were not stable under Bevel: evaluated UVs differ by 1.2e-7 between evaluations (multi-threaded), and signatures hashed them exactly. 20 units (all with Bevel) were "Structurally incompatible", which blocks their layers' export, and the KitchenMarble variant was refused. Fixed in b4e220d (signature version 2, authored SimpleBake UVs); the stored flags clear with a bake of either state.
