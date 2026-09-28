@@ -43,7 +43,7 @@ Shift and changing one selected resolution applies it to that batch only. Select
 any unit member and use **Add Selected Units** in Bake—the complete unit is queued
 and duplicates are ignored.
 
-New units receive an initial 1K/2K/4K/8K resolution suggestion from the
+New units receive an initial 1K/2K/4K resolution suggestion (4K at most) from the
 `SimpleBake` UV channel and the project texel-density target. Missing or invalid
 second UV channels safely fall back to the configured default resolution. The
 Bake stage provides queue-wide `÷2` and `×2` controls for quick test passes.

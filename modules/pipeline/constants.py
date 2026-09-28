@@ -25,10 +25,14 @@ ROLE_ITEMS = (
     ('EXPORT_ORIGINAL', "Export Original", "Export the source object unchanged"),
 )
 
+# 4096 is the largest atlas. Stored enum values are the item indices; 8192
+# was index 5 and is capped to 4096 on load (cap_removed_resolutions).
 RESOLUTION_ITEMS = tuple(
     (str(value), f"{value} × {value}", f"Bake a {value} × {value} shared atlas")
-    for value in (256, 512, 1024, 2048, 4096, 8192)
+    for value in (256, 512, 1024, 2048, 4096)
 )
+REMOVED_RESOLUTION_VALUE = 5
+MAX_RESOLUTION_VALUE = 4
 
 # Bake unit scenario override that bakes with the outliner as it is, even when
 # the unit's layer names a scenario. An empty override follows the layer.

@@ -8,7 +8,7 @@ BAKER_VERSION = 1
 OUTPUT_COLLECTION_NAME = "PM_Lightmap_Bakes"
 RESULT_SUFFIX = "_LM"
 
-RESOLUTION_VALUES = (256, 512, 1024, 2048, 4096, 8192)
+RESOLUTION_VALUES = (256, 512, 1024, 2048, 4096)
 RESOLUTION_ITEMS = tuple(
     (str(value), f"{value} × {value}", f"Bake a {value} × {value} lightmap")
     for value in RESOLUTION_VALUES

@@ -8,6 +8,8 @@ import bpy
 from ..scene_diagnostics import get_target_td, measure_texel_areas
 from .constants import (
     LAYER_COLOR_PALETTE,
+    MAX_RESOLUTION_VALUE,
+    REMOVED_RESOLUTION_VALUE,
     RESOLUTION_ITEMS,
     ROLE_ITEMS,
     SCHEMA_VERSION,
@@ -121,6 +123,32 @@ def release_objects(objects):
         cleared_exports += len(meta.extra_export_layers)
         meta.extra_export_layers.clear()
     return cleared_exports, left_units
+
+
+def cap_removed_resolutions():
+    """Files saved while 8192 existed store it as enum value 5, which no
+    longer reads as a resolution; make those 4096 (pipeline units, the
+    default unit resolution and the legacy Lightmap Baker)."""
+    owners = []
+    for scene in bpy.data.scenes:
+        project = getattr(scene, "pm_vr_project", None)
+        if project:
+            owners += [(unit, "resolution", unit.display_name) for unit in project.bake_units]
+            owners.append((project, "default_unit_resolution", "Default Unit Resolution"))
+        legacy = getattr(scene, "pm_lightmap_settings", None)
+        if legacy:
+            owners.append((legacy, "resolution", "Lightmap Baker"))
+            owners += [(item, "resolution", item.source_name or "Lightmap row") for item in legacy.objects]
+    capped = []
+    for owner, prop, label in owners:
+        if owner.get(prop) == REMOVED_RESOLUTION_VALUE:
+            owner[prop] = MAX_RESOLUTION_VALUE
+            capped.append(label)
+    if capped:
+        names = ", ".join(f'"{name}"' for name in capped[:10])
+        more = f" and {len(capped) - 10} more" if len(capped) > 10 else ""
+        log.info("Setup", f"8192 is no longer used; set {len(capped)} resolution(s) to 4096: {names}{more}")
+    return len(capped)
 
 
 def release_roleless_members():

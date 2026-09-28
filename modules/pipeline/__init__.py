@@ -35,6 +35,7 @@ def _load_post(_filepath):
         )
     identity.remember_identity_owners()
     setup_ops.release_roleless_members()
+    setup_ops.cap_removed_resolutions()
 
 
 def _separate_copies(force):
@@ -80,6 +81,7 @@ def register():
         identity.remember_identity_owners()
         generated.protect_all_generated_materials()
         setup_ops.release_roleless_members()
+        setup_ops.cap_removed_resolutions()
     except AttributeError:
         # bpy.data is restricted while add-ons register at startup; the
         # load_post handler covers the file that is opened next.
