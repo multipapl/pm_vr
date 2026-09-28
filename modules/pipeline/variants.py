@@ -28,10 +28,11 @@ MARKER_NAME = "VariantMarker"
 
 def usd_name(name):
     """The prim name Blender's USD export gives an object: characters other
-    than letters, digits and _ become _, and so does a leading digit."""
+    than letters, digits and _ become _, and a leading digit gets a _ in
+    front (4K_Leaf.001 -> _4K_Leaf_001, as seen in UniPlace exports)."""
     name = re.sub(r"[^\w]", "_", name or "") or "_"
     if name[0].isdigit():
-        name = "_" + name[1:]
+        name = "_" + name
     return name
 
 
