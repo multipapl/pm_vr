@@ -46,7 +46,11 @@ and duplicates are ignored.
 New units receive an initial 1K/2K/4K resolution suggestion (4K at most) from the
 `SimpleBake` UV channel and the project texel-density target. Missing or invalid
 second UV channels safely fall back to the configured default resolution. The
-Bake stage **Test** switch (100/75/50/25%) bakes the queue smaller for quick
+**Bake at 4K, save at unit size** bakes every unit at 4096, denoises it there and
+averages it down (in linear light) to the unit's resolution, like SimpleBake's
+separate bake and output sizes: sharper detail and less noise, at up to 16x the
+bake time for 1K units. The margin is scaled with it, and the Test switch scales
+both sizes. The Bake stage **Test** switch (100/75/50/25%) bakes the queue smaller for quick
 checks without touching the Setup resolutions; it is back at 100% when a file
 opens. A unit baked below its Setup resolution shows it in its status, and
 export warns about it.
@@ -97,7 +101,11 @@ defines both its runtime meaning and Blender behavior:
 
 - `Unlit` and `Translucent`: baked Base Color on `SimpleBake` in a simple Principled material;
 - `PBR`: baked Base Color plus original Metallic/Roughness/Normal on `UVMap`;
-- `Alpha`: baked Base Color plus original Alpha on `UVMap`;
+- `Alpha`: baked Base Color plus the source's opacity on `UVMap`. The opacity is
+  found in a Principled Alpha input or in a Mix Shader with a Transparent BSDF
+  (its factor), also inside node groups when it comes in through a group input
+  (like foliage shaders with an Opacity input). The generated material is one
+  Principled; translucency and mixing are in the bake;
 - `Glass`, `Emissive`, and `Runtime`: export original source data.
 
 `Runtime` contains application-driven data such as visual FX/video surfaces,

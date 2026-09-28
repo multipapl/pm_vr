@@ -261,6 +261,33 @@ def record(scenario, scope, keep_recorded=False):
     return len(rows)
 
 
+def _in_a_scene(collection):
+    return any(
+        collection == scene.collection or collection in scene.collection.children_recursive
+        for scene in bpy.data.scenes
+    )
+
+
+def prune_scenarios():
+    """Drop collections that were deleted (or unlinked from every scene)
+    since they were recorded; the scenario ignores them anyway."""
+    removed = 0
+    for scene in bpy.data.scenes:
+        project = getattr(scene, "pm_vr_project", None)
+        for scenario in (project.bake_scenarios if project else ()):
+            for index in reversed(range(len(scenario.collections))):
+                collection = scenario.collections[index].collection
+                if collection is None or not _in_a_scene(collection):
+                    scenario.collections.remove(index)
+                    removed += 1
+            scenario.active_collection_index = min(
+                scenario.active_collection_index, max(0, len(scenario.collections) - 1)
+            )
+    if removed:
+        log.info("Setup", f"Bake scenarios: dropped {removed} deleted collection entr(ies)")
+    return removed
+
+
 def switched_off_count(scenario):
     return sum(1 for item in scenario.collections if item.collection and not item.include)
 

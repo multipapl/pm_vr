@@ -37,6 +37,7 @@ def _load_post(_filepath):
     setup_ops.release_roleless_members()
     setup_ops.cap_removed_resolutions()
     setup_ops.reset_test_resolution()
+    scenarios.prune_scenarios()
 
 
 def _separate_copies(force):
@@ -83,6 +84,7 @@ def register():
         generated.protect_all_generated_materials()
         setup_ops.release_roleless_members()
         setup_ops.cap_removed_resolutions()
+        scenarios.prune_scenarios()
     except AttributeError:
         # bpy.data is restricted while add-ons register at startup; the
         # load_post handler covers the file that is opened next.

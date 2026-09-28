@@ -4,6 +4,7 @@ import os
 import uuid
 
 import bpy
+import numpy
 
 from ..lightmap_baker.images import StagedExport, save_linear_exr
 from .bake_scene import PipelineBakeError
@@ -24,8 +25,19 @@ def _staging_path(final_path):
     return os.path.join(directory, f".{stem}.pmvr_tmp_{uuid.uuid4().hex[:12]}{extension}")
 
 
+def _blend_relative(filepath):
+    """Path relative to the .blend when possible. A folder on another drive
+    has no relative path, so it stays absolute."""
+    if not bpy.data.filepath:
+        return filepath
+    try:
+        return bpy.path.relpath(filepath)
+    except ValueError:
+        return filepath
+
+
 def _point_image_at_file(image, filepath, file_format):
-    image.filepath = bpy.path.relpath(filepath) if bpy.data.filepath else filepath
+    image.filepath = _blend_relative(filepath)
     image.filepath_raw = image.filepath
     image.source = 'FILE'
     image.file_format = file_format
@@ -96,6 +108,62 @@ def stage_beauty_image(context, unit, state, image):
     finally:
         bpy.data.scenes.remove(export_scene)
     return staged
+
+
+def _png_scene(name, context_scene):
+    scene = bpy.data.scenes.new(name)
+    settings = scene.render.image_settings
+    settings.file_format = 'PNG'
+    settings.color_mode = 'RGB'
+    settings.color_depth = '8'
+    scene.view_settings.view_transform = 'Standard'
+    try:
+        scene.view_settings.look = 'None'
+    except (TypeError, ValueError):
+        pass
+    try:
+        scene.display_settings.display_device = context_scene.display_settings.display_device
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return scene
+
+
+def downscale_staged_beauty(context, image, path, size):
+    """Shrink a staged Beauty PNG (baked larger, already denoised) to size.
+
+    Blocks are averaged in linear light, like more samples per pixel would;
+    averaging the sRGB-encoded values would darken fine contrast."""
+    # A fresh load of the 8-bit PNG gives its sRGB-encoded values, whatever
+    # buffer the bake image itself uses.
+    source = bpy.data.images.load(path, check_existing=False)
+    try:
+        width, height = source.size
+        pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
+        source.pixels.foreach_get(pixels)
+    finally:
+        bpy.data.images.remove(source)
+    factor = width // size
+    if factor <= 1:
+        return
+    rgb = pixels.reshape(height, width, 4)[..., :3]
+    linear = numpy.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    linear = linear.reshape(size, factor, size, factor, 3).mean(axis=(1, 3))
+    encoded = numpy.where(
+        linear <= 0.0031308,
+        linear * 12.92,
+        1.055 * numpy.power(numpy.clip(linear, 0.0, None), 1.0 / 2.4) - 0.055,
+    )
+    result = numpy.ones((size, size, 4), dtype=numpy.float32)
+    result[..., :3] = numpy.clip(encoded, 0.0, 1.0)
+    small = bpy.data.images.new(f"__PMVR_DOWNSCALE_{uuid.uuid4().hex}", size, size, alpha=False)
+    scene = _png_scene(f"__PMVR_DOWNSCALE_{uuid.uuid4().hex}", context.scene)
+    try:
+        small.pixels.foreach_set(result.ravel())
+        small.save_render(path, scene=scene)
+    finally:
+        bpy.data.images.remove(small)
+        bpy.data.scenes.remove(scene)
+    image.reload()
 
 
 def beauty_image_name(layer, unit, state):

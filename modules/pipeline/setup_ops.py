@@ -67,10 +67,15 @@ def suggested_unit_resolution(context, objects):
         (value for value in AUTO_RESOLUTIONS if value >= required_size),
         AUTO_RESOLUTIONS[-1],
     )
+    names = f'"{objects[0].name}"' + (f" and {len(objects) - 1} more" if len(objects) > 1 else "")
+    capped = (
+        f"; above {AUTO_RESOLUTIONS[-1]}px, texel density stays below target"
+        if required_size > AUTO_RESOLUTIONS[-1] else ""
+    )
     log.info(
         "Setup",
-        f"Suggested {chosen}px for {len(objects)} object(s); "
-        f"required {required_size:.0f}px at {target_td:.1f}px/cm",
+        f"Suggested {chosen}px for {names}; "
+        f"required {required_size:.0f}px at {target_td:.1f}px/cm{capped}",
     )
     return str(chosen)
 
@@ -632,6 +637,16 @@ def bake_resolution(project, unit):
     return max(64, int(unit.resolution) * int(project.test_resolution) // 100)
 
 
+def bake_sizes(project, unit):
+    """(bake size, saved size) for a unit. Bake at 4K bakes at the largest
+    resolution (scaled by the test resolution) and saves at the unit's."""
+    saved = bake_resolution(project, unit)
+    if not project.bake_at_max_resolution:
+        return saved, saved
+    baked = max(saved, SUPPORTED_RESOLUTIONS[-1] * int(project.test_resolution) // 100)
+    return baked, saved
+
+
 def test_resolution_label(project):
     return "" if project.test_resolution == '100' else f"{project.test_resolution}%"
 
@@ -900,7 +915,12 @@ class PMVR_OT_MoveQueueEntry(bpy.types.Operator):
 class PMVR_OT_SetLightingState(bpy.types.Operator):
     bl_idname = "pmvr.set_lighting_state"
     bl_label = "Set Lighting State"
+    bl_description = "Show this lighting state: its lights, world and baked results"
     state: bpy.props.EnumProperty(items=(('DAY', "Day", ""), ('EVENING', "Evening", "")))
+
+    @classmethod
+    def poll(cls, context):
+        return structure_editable(context)
 
     def execute(self, context):
         try:

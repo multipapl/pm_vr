@@ -285,6 +285,130 @@ def principled_nodes(material):
     return [node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED']
 
 
+def _linked_from(socket):
+    """Output socket feeding an input, skipping reroutes and muted links."""
+    while socket is not None and socket.is_linked:
+        link = socket.links[0]
+        if link.is_muted or not link.is_valid:
+            return None
+        if link.from_node.type == 'REROUTE':
+            socket = link.from_node.inputs[0]
+            continue
+        return link.from_socket
+    return None
+
+
+def _socket_value(socket):
+    value = socket.default_value
+    if hasattr(value, "__len__"):
+        # A colour used as opacity: Blender converts it by luminance; the
+        # average is close enough to tell opaque from transparent.
+        return sum(value[:3]) / 3.0
+    return float(value)
+
+
+def _group_output(tree):
+    outputs = [node for node in tree.nodes if node.type == 'GROUP_OUTPUT']
+    return next((node for node in outputs if node.is_active_output), outputs[0] if outputs else None)
+
+
+def _alpha_value(input_socket, groups, invert=False):
+    """(socket in the material's own tree, invert) or ('VALUE', value) for an
+    alpha input, following group inputs out to the group node's links."""
+    source = _linked_from(input_socket)
+    if source is None:
+        value = _socket_value(input_socket)
+        return ('VALUE', 1.0 - value if invert else value)
+    if source.node.type == 'GROUP_INPUT' and groups:
+        outer = groups[-1]
+        outer_input = next(
+            (socket for socket in outer.inputs if socket.identifier == source.identifier),
+            None,
+        )
+        if outer_input is None:
+            raise PipelineBakeError(f'node group "{outer.node_tree.name}" has no input "{source.name}"')
+        return _alpha_value(outer_input, groups[:-1], invert)
+    if groups:
+        raise PipelineBakeError(
+            f'transparency is computed inside node group "{groups[-1].node_tree.name}"; '
+            "feed it in through a group input (like Opacity)"
+        )
+    return ('SOCKET', source, invert)
+
+
+def _shader_alphas(shader_socket, groups, depth=0):
+    """Alpha sources found behind a shader output socket."""
+    if shader_socket is None or depth > 32:
+        return []
+    node = shader_socket.node
+    if node.type == 'GROUP' and node.node_tree:
+        output = _group_output(node.node_tree)
+        inner = next(
+            (socket for socket in output.inputs if socket.identifier == shader_socket.identifier),
+            None,
+        ) if output else None
+        return _shader_alphas(_linked_from(inner), [*groups, node], depth + 1) if inner else []
+    if node.type == 'GROUP_INPUT' and groups:
+        outer = groups[-1]
+        outer_input = next(
+            (socket for socket in outer.inputs if socket.identifier == shader_socket.identifier),
+            None,
+        )
+        return _shader_alphas(_linked_from(outer_input), groups[:-1], depth + 1) if outer_input else []
+    if node.type == 'BSDF_PRINCIPLED':
+        return [_alpha_value(node.inputs["Alpha"], groups)]
+    if node.type == 'MIX_SHADER':
+        factor, first, second = node.inputs[0], _linked_from(node.inputs[1]), _linked_from(node.inputs[2])
+        for transparent, other, invert in ((first, second, False), (second, first, True)):
+            if transparent is not None and transparent.node.type == 'BSDF_TRANSPARENT':
+                # Factor 0 shows the first input: with Transparent there, the
+                # factor itself is the opacity.
+                others = _shader_alphas(other, groups, depth + 1)
+                if any(kind != 'VALUE' or value < 0.999 for kind, value, *_ in others):
+                    raise PipelineBakeError("transparency is combined from several sources")
+                return [_alpha_value(factor, groups, invert)]
+        return _shader_alphas(first, groups, depth + 1) + _shader_alphas(second, groups, depth + 1)
+    if node.type == 'ADD_SHADER':
+        return (
+            _shader_alphas(_linked_from(node.inputs[0]), groups, depth + 1)
+            + _shader_alphas(_linked_from(node.inputs[1]), groups, depth + 1)
+        )
+    if node.type == 'BSDF_TRANSPARENT':
+        return [('VALUE', 0.0)]
+    return []
+
+
+def find_alpha_source(material):
+    """Where a material's transparency comes from, for the Alpha layer.
+
+    Accepts a Principled Alpha input, or a Mix Shader with a Transparent BSDF
+    on one side (its Factor is the opacity), also inside node groups when the
+    value comes in through a group input. Returns ('SOCKET', output socket in
+    the material's own tree, invert) or ('VALUE', value); raises
+    PipelineBakeError when there is no transparency or it is ambiguous."""
+    if not material or not material.use_nodes or not material.node_tree:
+        raise PipelineBakeError("material has no nodes")
+    outputs = [node for node in material.node_tree.nodes if node.type == 'OUTPUT_MATERIAL']
+    output = next((node for node in outputs if node.is_active_output), outputs[0] if outputs else None)
+    if not output:
+        raise PipelineBakeError("material has no Material Output")
+    found = _shader_alphas(_linked_from(output.inputs["Surface"]), [])
+    # One shader often reaches the output twice (a Principled feeding both a
+    # Mix and an Add with Translucent): the same source counts once.
+    unique = {}
+    for item in found:
+        key = (item[0], item[1].as_pointer(), item[2]) if item[0] == 'SOCKET' else (item[0], round(item[1], 4))
+        unique.setdefault(key, item)
+    transparent = [item for item in unique.values() if item[0] != 'VALUE' or item[1] < 0.999]
+    if not transparent:
+        raise PipelineBakeError(
+            "no transparency found (Principled Alpha, or a Mix Shader with Transparent BSDF)"
+        )
+    if len(transparent) > 1:
+        raise PipelineBakeError("transparency comes from several shaders; keep one source")
+    return transparent[0]
+
+
 def make_fallback_material(name):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
@@ -369,9 +493,13 @@ def copy_receiver(context, source, work_collection, image, receiver_type):
         index for index in used_material_indices if index >= len(mesh.materials)
     ]
     if invalid_material_indices:
+        bad_faces = sum(
+            1 for polygon in mesh.polygons if polygon.material_index >= len(mesh.materials)
+        )
         raise PipelineBakeError(
-            f"{source.name}: evaluated mesh uses invalid material slots "
-            f"{invalid_material_indices}"
+            f"{source.name}: {bad_faces} face(s) use material slot(s) "
+            f"{invalid_material_indices[:3]} but the object has {len(mesh.materials)}; "
+            "in Edit Mode select all and Assign a material"
         )
     if len(mesh.materials) > 1:
         log.info(

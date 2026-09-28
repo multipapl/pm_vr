@@ -52,6 +52,35 @@
 - Bake still follows the outliner: a unit whose members are all hidden is skipped (counted as skipped), and its export then fails loudly as not ready.
 - Regression: `tests/blender_export_visibility_smoke.py` (USDZ prims and GLB nodes checked per state; visibility compared before/after).
 
+## UniPlace test bake 2026-09-28 (50%, Day+Evening): open problems
+
+Result: 399 ready, 1 skipped, 20 failed in 3h 56m (log `PMVR_Logs/Uniplace_2026-09-28.log`). To bake one by one after fixes:
+
+- `LeafIvy`, `LeafIvy01`..`LeafIvy07` (8 units, both states): "Material slot 0 must contain exactly one Principled BSDF"; foliage uses mixed shaders.
+- `BR_Unlit Unit 146` (member `CeramicVaseDarkPBR`, both states): "evaluated mesh uses invalid material slots [19464]"; the vase has one material and no modifiers, shared unit packed in one UV tile.
+- `TR_Unlit Unit 149` (both states): "only partially visible"; the user sees all members visible.
+- `LampsWhiteLrPBR` Evening: skipped (Day-only PBR lamp; the Evening variant is a separate emissive object). Expected, but the log gives no reason.
+- Console: thousands of identical "ERROR: Python context internal state bug. this should not happen!" lines, no other context.
+- The 92 units queued at 03:35 were changed by the old ÷2/×2 buttons and probably share one Setup resolution now.
+- The file shows the Evening baked result; the Day/Evening switch did not change it.
+- Bake scenarios keep deleted collections in their list as "(deleted)".
+
+Handled the same day:
+- Alpha: `find_alpha_source()` (bake_scene) finds opacity in Principled Alpha or a Mix Shader with Transparent BSDF, through node groups via group inputs; the generated Alpha material is one Principled (baked colour + opacity branch on UVMap). PBR still needs one Principled per slot. Test: `tests/blender_alpha_sources_smoke.py`.
+- Vase and rock are data problems the user fixes; messages now name them: faces using a missing slot (also in Validate), and each hidden member of a partially visible unit with the reason (render disabled / not in scene / collection disabled).
+- Day/Evening: the queue ended with the lighting restored but baked results bound to the last baked state (the file showed Evening in Day). The queue now binds the restored state; the Lighting switch is also at the top of Bake; "Bake for" states are checkboxes by the Bake button. The GUI scenario test failed with the old code (Day lighting, Evening results) and passes now.
+- Skipped units log why; queue start logs texture cache and autopack.
+- Scenarios hide deleted collections and drop them on load/register (`prune_scenarios`).
+- The console "Python context internal state bug" did not reproduce: GUI modal queue on OptiX with texture cache, a scenario and the Bake panel visible, 16 bakes, 0 lines. Likely from the user's environment (other add-ons, drivers, long session); open.
+
+## Bake at 4K and small fixes (2026-09-28)
+
+- `project.bake_at_max_resolution`: units bake at 4096 (times the test share), are denoised at that size, and `downscale_staged_beauty()` averages blocks in linear light down to the unit's resolution before materials are built. The bake margin is scaled by the factor. Test: brightness ratio 1.000 against a direct bake at the same size. On UniPlace `Artwork` (1024): 2.25x the fine-detail energy of a direct 1024 bake, colour within 1.7%, 176 s instead of 20 s.
+- PBR generated materials drop the unreachable old Base Color branch (`_prune_unreachable_material_nodes`), like Alpha.
+- A Beauty folder on another drive than the .blend made the commit fail (`relpath` across drives); `_blend_relative()` keeps such paths absolute.
+- The Setup resolution log names the object and says when the required size is above 4096 (texel density stays below target).
+- Texture limit and texture cache stay out of the add-on by the user's choice; they are managed in Blender. The texture cache shifts bounce light (see the pipeline document on the user's Desktop).
+
 ## Audit follow-ups not changed
 
 - Export Original children of a baked parent keep the source parent as a transform-only USD Xform; GLB flattens them to the root. World transforms are correct in both.

@@ -110,7 +110,12 @@ class PMVR_UL_BakeScenarios(bpy.types.UIList):
 
 class PMVR_UL_ScenarioCollections(bpy.types.UIList):
     """Recorded collections in outliner order; the content of a disabled
-    collection is greyed out because it is disabled with it."""
+    collection is greyed out because it is disabled with it. Deleted
+    collections are not listed (they are dropped when the file loads)."""
+
+    def filter_items(self, _context, data, propname):
+        items = getattr(data, propname)
+        return [self.bitflag_filter_item if item.collection else 0 for item in items], []
 
     def draw_item(self, _context, layout, data, item, _icon, _active_data, _active_propname, index):
         parent_off = False
@@ -322,10 +327,9 @@ def draw_bake(layout, context):
     if not project.initialized:
         layout.operator("pmvr.initialize_project", icon='PLAY')
         return
-    states = layout.row(align=True)
-    states.label(text="Bake:")
-    states.prop(project, "bake_day", text="Day", icon='LIGHT_SUN', toggle=True)
-    states.prop(project, "bake_evening", text="Evening", icon='LIGHT', toggle=True)
+    # What the scene shows (lighting and baked results); which states the
+    # queue bakes is chosen next to the Bake button.
+    draw_state_switch(layout, project)
     if SHOW_LIGHTMAP or project.bake_mode != 'BEAUTY':
         # A file left in Lightmap mode keeps the switch so it can go back.
         layout.prop(project, "bake_mode", expand=True)
@@ -350,6 +354,11 @@ def draw_bake(layout, context):
     test_resolution.alert = bool(test)
     test_resolution.label(text="Test:")
     test_resolution.prop(project, "test_resolution", expand=True)
+    queue.prop(project, "bake_at_max_resolution", text="Bake at 4K, save at unit size")
+    states = queue.row(align=True)
+    states.label(text="Bake for:")
+    states.prop(project, "bake_day", text="Day")
+    states.prop(project, "bake_evening", text="Evening")
     run = queue.row()
     run.scale_y = 1.4
     if project.operation_running:
@@ -368,7 +377,7 @@ def draw_bake(layout, context):
         layout.label(text=project.last_operation_summary, icon='INFO')
 
     preview = layout.box()
-    preview.label(text=f"Preview: {project.active_lighting_state.title()} {mode_label}", icon='HIDE_OFF')
+    preview.label(text="Preview", icon='HIDE_OFF')
     row = preview.row(align=True)
     row.prop(project, "show_sources", toggle=True)
     row.prop(project, "show_generated", toggle=True)
@@ -456,9 +465,13 @@ HELP_SECTIONS = (
     ("Bake", 'RENDER_STILL', (
         "Relative output folders (//): save the .blend first",
         "Unit members: all visible or all hidden in the state",
-        "PBR, Alpha: one Principled BSDF per material slot",
+        "PBR: one Principled BSDF per material slot",
+        "Alpha: opacity from Principled Alpha or a Transparent mix",
+        "Alpha opacity may come through a node group input",
+        "Lighting Day/Evening (top): shows that state's bake",
         "Modifiers must not add or remove material slots",
         "Esc or Cancel Bake: stops the queue, current unit discarded",
+        "Bake at 4K: bakes 4096, saves at unit size (sharper, slower)",
         "Layers and units are locked while baking",
     )),
     ("Bake scenarios", 'OUTLINER_COLLECTION', (

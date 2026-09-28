@@ -443,6 +443,15 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         ),
         default='100',
     )
+    bake_at_max_resolution: bpy.props.BoolProperty(
+        name="Bake at 4K",
+        description=(
+            "Bake every unit at 4096 and save it at the unit's resolution: "
+            "sharper edges and less noise, slower for smaller units. Test "
+            "resolution scales both"
+        ),
+        default=False,
+    )
     margin: bpy.props.IntProperty(name="Margin", default=16, min=0, soft_max=128)
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)
     default_unit_resolution: bpy.props.EnumProperty(

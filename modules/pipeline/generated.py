@@ -8,6 +8,7 @@ from .bake_scene import (
     ensure_scene_collection,
     make_fallback_material,
     pipeline_collection,
+    find_alpha_source,
     principled_nodes,
 )
 from .constants import (
@@ -138,6 +139,43 @@ def _scene_material(unit, layer, state, image):
     return [material]
 
 
+def _alpha_material(material, image):
+    """Turn a copy of the source material into what USD and glTF understand:
+    one Principled with the baked colour and the source's opacity mask (on
+    UVMap). Mixed shaders, translucency and node groups stay in the source;
+    their look is already in the bake."""
+    kind, *source = find_alpha_source(material)
+    tree = material.node_tree
+    outputs = [node for node in tree.nodes if node.type == 'OUTPUT_MATERIAL']
+    output = next((node for node in outputs if node.is_active_output), outputs[0])
+    for socket in output.inputs:
+        for link in list(socket.links):
+            tree.links.remove(link)
+    principled = tree.nodes.new("ShaderNodeBsdfPrincipled")
+    principled.name = "PMVR Alpha Principled"
+    principled.inputs["Metallic"].default_value = 0.0
+    tree.links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+    alpha = principled.inputs["Alpha"]
+    if kind == 'VALUE':
+        alpha.default_value = source[0]
+    else:
+        socket, invert = source
+        if invert:
+            flip = tree.nodes.new("ShaderNodeMath")
+            flip.name = "PMVR Opacity"
+            flip.operation = 'SUBTRACT'
+            flip.inputs[0].default_value = 1.0
+            tree.links.new(socket, flip.inputs[1])
+            socket = flip.outputs[0]
+        tree.links.new(socket, alpha)
+    _new_uv_and_image_nodes(material, image, principled)
+    _prune_unreachable_material_nodes(material)
+    try:
+        material.surface_render_method = 'DITHERED'
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+
 def _copied_materials(unit, source, layer, state, image):
     results = []
     source_materials = [slot.material for slot in source.material_slots]
@@ -148,25 +186,18 @@ def _copied_materials(unit, source, layer, state, image):
             material = original.copy() if original else make_fallback_material(f"PMVR_{source.name}_{slot}")
             results.append(material)
             material.name = f"PMVR_{safe_stem(source.name)}_{state}_{slot}_{unit.unit_id[:8]}"
-            principled = principled_nodes(material)
-            if len(principled) != 1:
-                raise PipelineBakeError(f'{source.name}: material slot {slot} must resolve to exactly one Principled BSDF')
             if layer.layer_type == 'ALPHA':
-                alpha = principled[0].inputs.get("Alpha")
-                if not alpha or (not alpha.is_linked and alpha.default_value >= 1.0):
-                    raise PipelineBakeError(f'{source.name}: Alpha material slot {slot} has no Alpha branch/value')
-                base = principled[0].inputs.get("Base Color")
-                for socket in principled[0].inputs:
-                    if socket != alpha and socket != base:
-                        for link in list(socket.links):
-                            material.node_tree.links.remove(link)
-            _new_uv_and_image_nodes(material, image, principled[0])
-            if layer.layer_type == 'ALPHA':
-                _prune_unreachable_material_nodes(material)
                 try:
-                    material.surface_render_method = 'DITHERED'
-                except (AttributeError, TypeError, ValueError):
-                    pass
+                    _alpha_material(material, image)
+                except PipelineBakeError as exc:
+                    raise PipelineBakeError(f'{source.name}: Alpha material slot {slot}: {exc}') from exc
+            else:
+                principled = principled_nodes(material)
+                if len(principled) != 1:
+                    raise PipelineBakeError(f'{source.name}: material slot {slot} must resolve to exactly one Principled BSDF')
+                _new_uv_and_image_nodes(material, image, principled[0])
+                # The old Base Color branch no longer reaches the output.
+                _prune_unreachable_material_nodes(material)
             _tag_material(material, unit, source.pm_vr_pipeline.source_id, layer, state, slot)
         return results
     except Exception:

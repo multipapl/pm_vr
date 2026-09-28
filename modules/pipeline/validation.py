@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 
 import bpy
+import numpy
 
-from .bake_scene import PipelineBakeError, principled_nodes
+from .bake_scene import PipelineBakeError, find_alpha_source, principled_nodes
 from .constants import BAKE_LAYER_TYPES, BAKE_UV_NAME, PRIMARY_UV_NAME
 from .identity import duplicate_source_ids, find_layer, find_unit, layer_members, unit_members
 from .scenarios import Scope, Visibility, hidden_member_message, unit_scenario
@@ -26,6 +27,14 @@ def object_render_visible(obj, view_layer):
         return view_layer.objects.get(obj.name) is obj
     except ReferenceError:
         return False
+
+
+def _hidden_reason(obj, view_layer):
+    if obj.hide_render:
+        return "render disabled, camera icon"
+    if not obj.users_scene:
+        return "not in the scene"
+    return "its collection is disabled in this state"
 
 
 def validate_project(context, include_state=True):
@@ -97,30 +106,44 @@ def validate_unit(context, unit, require_visible=True):
             issues.append(Issue('ERROR', f'Missing UV map "{BAKE_UV_NAME}"', obj.name))
         if not obj.data.uv_layers.get(PRIMARY_UV_NAME):
             issues.append(Issue('ERROR', f'Missing UV map "{PRIMARY_UV_NAME}"', obj.name))
-        if layer.layer_type in {'PBR', 'ALPHA'}:
+        if layer.layer_type == 'PBR':
+            # PBR keeps the source's Roughness/Metallic/Normal: it needs to
+            # know which node holds them.
             for slot_index, slot in enumerate(obj.material_slots):
-                material = slot.material
-                principled = principled_nodes(material)
-                if len(principled) != 1:
+                if len(principled_nodes(slot.material)) != 1:
                     issues.append(Issue(
                         'ERROR',
-                        f"Material slot {slot_index} must contain exactly one Principled BSDF",
+                        f"PBR material slot {slot_index} must contain exactly one Principled BSDF",
                         obj.name,
                     ))
-                    continue
-                if layer.layer_type == 'ALPHA':
-                    alpha = principled[0].inputs.get("Alpha")
-                    if not alpha or (not alpha.is_linked and alpha.default_value >= 1.0):
-                        issues.append(Issue(
-                            'ERROR',
-                            f"Alpha material slot {slot_index} has no Alpha branch/value",
-                            obj.name,
-                        ))
-        visible_count += int(object_render_visible(obj, context.view_layer))
-    if require_visible and visible_count == 0:
+        elif layer.layer_type == 'ALPHA':
+            # Alpha keeps only the opacity mask; the rest of the look is baked.
+            for slot_index, slot in enumerate(obj.material_slots):
+                try:
+                    find_alpha_source(slot.material)
+                except PipelineBakeError as exc:
+                    issues.append(Issue('ERROR', f"Alpha material slot {slot_index}: {exc}", obj.name))
+        slot_count = max(1, len(obj.material_slots))
+        indices = numpy.empty(len(obj.data.polygons), dtype=numpy.int32)
+        obj.data.polygons.foreach_get("material_index", indices)
+        bad_faces = int((indices >= slot_count).sum())
+        if bad_faces:
+            issues.append(Issue(
+                'ERROR',
+                f"{bad_faces} face(s) use a material slot the object does not have "
+                f"(it has {len(obj.material_slots)}); in Edit Mode select all and Assign a material",
+                obj.name,
+            ))
+    hidden = [obj for obj in members if not object_render_visible(obj, context.view_layer)]
+    if require_visible and len(hidden) == len(members):
         issues.append(Issue('INFO', f'Unit "{unit.display_name}" is fully hidden and will be skipped'))
-    elif require_visible and visible_count != len(members):
-        issues.append(Issue('ERROR', f'Unit "{unit.display_name}" is only partially visible'))
+    elif require_visible and hidden:
+        issues.append(Issue(
+            'ERROR',
+            f'Unit "{unit.display_name}" is only partially visible: '
+            + ", ".join(f'"{obj.name}" ({_hidden_reason(obj, context.view_layer)})' for obj in hidden[:5])
+            + (f" and {len(hidden) - 5} more" if len(hidden) > 5 else ""),
+        ))
     return issues
 
 

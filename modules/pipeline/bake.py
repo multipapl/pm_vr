@@ -13,6 +13,7 @@ from ..lightmap_baker.state import ContextState
 from .bake_files import (
     beauty_image_name,
     commit_staged_file,
+    downscale_staged_beauty,
     stage_beauty_image,
     stage_lightmap_image,
 )
@@ -46,7 +47,7 @@ from .generated import (
 )
 from .identity import find_layer, find_unit, unit_members
 from .scenarios import ScenarioSession, preflight as scenario_preflight
-from .setup_ops import bake_resolution, test_resolution_label
+from .setup_ops import bake_resolution, bake_sizes, preview_state, test_resolution_label
 from . import log, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
@@ -84,6 +85,8 @@ class BeautyBakeRuntime:
         self.receivers = []
         self.image = None
         self.resolution = 0
+        self.bake_size = 0
+        self.margin = 0
         self.signature = ""
         self.snapshot = None
         self.context_state = None
@@ -126,10 +129,12 @@ class BeautyBakeRuntime:
         for source in self.members:
             self.snapshot.hide(source)
         self.context.scene.cycles.samples = self.project.cycles_samples
-        self.resolution = bake_resolution(self.project, self.unit)
+        self.bake_size, self.resolution = bake_sizes(self.project, self.unit)
+        # The margin is meant in saved pixels; a larger bake needs it scaled.
+        self.margin = self.project.margin * (self.bake_size // self.resolution)
         self.image = create_float_image(
             beauty_image_name(self.layer, self.unit, self.state),
-            self.resolution,
+            self.bake_size,
         )
         try:
             self.image.colorspace_settings.name = 'sRGB'
@@ -161,7 +166,7 @@ class BeautyBakeRuntime:
             'GLOSSY', 'TRANSMISSION', 'EMIT',
         }
         self.config = BakeConfigurationSnapshot(self.context.scene)
-        self.config.configure('COMBINED', self.project.margin, False, all_passes)
+        self.config.configure('COMBINED', self.margin, False, all_passes)
         log.info(
             "Beauty",
             f'Start {self.state.title()} unit "{self.unit.display_name}": '
@@ -170,6 +175,7 @@ class BeautyBakeRuntime:
                 f' (test, Setup {self.unit.resolution}px)'
                 if self.resolution != int(self.unit.resolution) else ''
             )
+            + (f', baked at {self.bake_size}px' if self.bake_size != self.resolution else '')
             + f', {self.project.cycles_samples} samples',
         )
         return "READY"
@@ -193,7 +199,7 @@ class BeautyBakeRuntime:
             "type": 'COMBINED',
             "use_clear": False,
             "target": 'IMAGE_TEXTURES',
-            "margin": self.project.margin,
+            "margin": self.margin,
             "margin_type": getattr(bake, "margin_type", 'ADJACENT_FACES'),
             "normal_space": bake.normal_space,
             "normal_r": bake.normal_r,
@@ -240,6 +246,13 @@ class BeautyBakeRuntime:
                 log.warning(
                     "Beauty",
                     f'{self.unit.display_name}: denoise failed; using raw Beauty: {exc}',
+                )
+            if self.bake_size != self.resolution:
+                downscale_staged_beauty(
+                    self.context,
+                    self.image,
+                    staged_file.staging_path,
+                    self.resolution,
                 )
             _show_bake_stage(
                 self.operator,
@@ -722,9 +735,17 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             + (
                 f", TEST resolution {test_resolution_label(project)} of Setup"
                 if test_resolution_label(project) else ""
-            ),
+            )
+            + (", bake at 4K" if project.bake_at_max_resolution else ""),
         )
         log.info("Bake", log.environment(context))
+        render = context.scene.render
+        log.info(
+            "Bake",
+            f"Texture cache {'on' if getattr(render, 'use_texture_cache', False) else 'off'}"
+            + (", auto generate" if getattr(render, 'use_auto_generate_texture_cache', False) else "")
+            + f"; autopack {'on' if bpy.data.use_autopack else 'off'}",
+        )
         if project.bake_mode == 'LIGHTMAP':
             return self._execute_lightmap(context, states)
 
@@ -902,6 +923,13 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 self._current_runtime = runtime
                 status = runtime.prepare()
                 if status == "SKIPPED":
+                    other = "Day" if state == 'EVENING' else "Evening"
+                    log.info(
+                        "Beauty",
+                        f'Skipped {state.title()} unit "{unit.display_name}": none of its '
+                        f'objects is in the {state.title()} scene (for example they live only '
+                        f'in the {other} lighting collection)',
+                    )
                     runtime.cleanup(keep_image=False)
                     self._current_runtime = None
                     self._skipped += 1
@@ -983,6 +1011,9 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         self._project.operation_progress = 1.0
         try:
             activate_state(context, self._original_state)
+            # Baked results were bound to the last baked state; show the
+            # state the scene is in again.
+            preview_state(self._project)
         except Exception as exc:
             log.warning("Bake", f"Could not restore {self._original_state}: {exc}")
         try:
@@ -1084,6 +1115,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             restore_viewport_shading(self._viewport_shading)
             try:
                 activate_state(context, original_state)
+                preview_state(project)
             except Exception as exc:
                 log.warning("Bake", f"Restore warning: {exc}")
             try:
