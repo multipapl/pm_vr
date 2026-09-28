@@ -626,46 +626,26 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class PMVR_OT_ScaleQueuedResolution(bpy.types.Operator):
-    bl_idname = "pmvr.scale_queued_resolution"
-    bl_label = "Scale Queued Resolution"
-    bl_description = "Halve or double the resolution of every unit in the bake queue"
-    bl_options = {'REGISTER', 'UNDO'}
+def bake_resolution(project, unit):
+    """Resolution the queue bakes unit at: its Setup value, scaled down while
+    a test resolution is chosen."""
+    return max(64, int(unit.resolution) * int(project.test_resolution) // 100)
 
-    direction: bpy.props.EnumProperty(
-        items=(('HALF', "Half", ""), ('DOUBLE', "Double", "")),
-        default='HALF',
-    )
 
-    def execute(self, context):
-        project = context.scene.pm_vr_project
-        unit_ids = {entry.unit_id for entry in project.bake_queue}
-        changed = 0
-        selected_state = [unit.batch_selected for unit in project.bake_units]
-        try:
-            for unit in project.bake_units:
-                unit.batch_selected = False
-            for unit in project.bake_units:
-                if unit.unit_id not in unit_ids:
-                    continue
-                current = int(unit.resolution)
-                index = SUPPORTED_RESOLUTIONS.index(current)
-                target_index = (
-                    max(0, index - 1)
-                    if self.direction == 'HALF'
-                    else min(len(SUPPORTED_RESOLUTIONS) - 1, index + 1)
-                )
-                target = SUPPORTED_RESOLUTIONS[target_index]
-                if target != current:
-                    unit.resolution = str(target)
-                    changed += 1
-        finally:
-            for unit, was_selected in zip(project.bake_units, selected_state):
-                unit.batch_selected = was_selected
-        symbol = "÷2" if self.direction == 'HALF' else "×2"
-        log.info("Bake", f"Queue resolution {symbol}: {changed} unit(s) changed")
-        self.report({'INFO'}, f"Changed {changed} queued unit(s)")
-        return {'FINISHED'} if unit_ids else {'CANCELLED'}
+def test_resolution_label(project):
+    return "" if project.test_resolution == '100' else f"{project.test_resolution}%"
+
+
+def baked_resolution(unit, state):
+    return unit.day_baked_resolution if state == 'DAY' else unit.evening_baked_resolution
+
+
+def reset_test_resolution():
+    """A reopened file always bakes at its Setup resolutions."""
+    for scene in bpy.data.scenes:
+        project = getattr(scene, "pm_vr_project", None)
+        if project and project.test_resolution != '100':
+            project.test_resolution = '100'
 
 
 class PMVR_OT_SelectAllUnitsForResolution(bpy.types.Operator):
@@ -1158,7 +1138,6 @@ CLASSES = (
     PMVR_OT_UnassignSelected,
     PMVR_OT_EditExtraExports,
     PMVR_OT_AddBakeUnit,
-    PMVR_OT_ScaleQueuedResolution,
     PMVR_OT_SelectAllUnitsForResolution,
     PMVR_OT_AssignSelectedToUnit,
     PMVR_OT_RemoveBakeUnit,

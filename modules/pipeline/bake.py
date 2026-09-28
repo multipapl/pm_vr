@@ -46,6 +46,7 @@ from .generated import (
 )
 from .identity import find_layer, find_unit, unit_members
 from .scenarios import ScenarioSession, preflight as scenario_preflight
+from .setup_ops import bake_resolution, test_resolution_label
 from . import log, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
@@ -82,6 +83,7 @@ class BeautyBakeRuntime:
         self.members = []
         self.receivers = []
         self.image = None
+        self.resolution = 0
         self.signature = ""
         self.snapshot = None
         self.context_state = None
@@ -124,9 +126,10 @@ class BeautyBakeRuntime:
         for source in self.members:
             self.snapshot.hide(source)
         self.context.scene.cycles.samples = self.project.cycles_samples
+        self.resolution = bake_resolution(self.project, self.unit)
         self.image = create_float_image(
             beauty_image_name(self.layer, self.unit, self.state),
-            int(self.unit.resolution),
+            self.resolution,
         )
         try:
             self.image.colorspace_settings.name = 'sRGB'
@@ -162,8 +165,12 @@ class BeautyBakeRuntime:
         log.info(
             "Beauty",
             f'Start {self.state.title()} unit "{self.unit.display_name}": '
-            f'{len(self.receivers)} object(s), {self.unit.resolution}px, '
-            f'{self.project.cycles_samples} samples',
+            f'{len(self.receivers)} object(s), {self.resolution}px'
+            + (
+                f' (test, Setup {self.unit.resolution}px)'
+                if self.resolution != int(self.unit.resolution) else ''
+            )
+            + f', {self.project.cycles_samples} samples',
         )
         return "READY"
 
@@ -297,10 +304,12 @@ class BeautyBakeRuntime:
             self.unit.day_signature = self.signature
             self.unit.day_beauty_image = self.image.name
             self.unit.day_status = "Ready"
+            self.unit.day_baked_resolution = self.resolution
         else:
             self.unit.evening_signature = self.signature
             self.unit.evening_beauty_image = self.image.name
             self.unit.evening_status = "Ready"
+            self.unit.evening_baked_resolution = self.resolution
         other_signature = (
             self.unit.evening_signature
             if self.state == 'DAY'
@@ -456,7 +465,7 @@ def bake_lightmap_unit(context, unit, operator=None):
         for source in members:
             snapshot.hide(source)
         context.scene.cycles.samples = project.cycles_samples
-        resolution = int(unit.resolution)
+        resolution = bake_resolution(project, unit)
         raw = create_float_image(
             f"PMVR_Lightmap_{unit.artifact_key[:8]}_{state}_{uuid.uuid4().hex[:8]}",
             resolution,
@@ -709,7 +718,11 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             "Bake",
             f"Queue start: {len(project.bake_queue)} unit(s), "
             f"states {', '.join(states)}, mode {project.bake_mode}, "
-            f"{project.cycles_samples} samples, margin {project.margin}px",
+            f"{project.cycles_samples} samples, margin {project.margin}px"
+            + (
+                f", TEST resolution {test_resolution_label(project)} of Setup"
+                if test_resolution_label(project) else ""
+            ),
         )
         log.info("Bake", log.environment(context))
         if project.bake_mode == 'LIGHTMAP':

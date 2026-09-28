@@ -46,7 +46,10 @@ and duplicates are ignored.
 New units receive an initial 1K/2K/4K resolution suggestion (4K at most) from the
 `SimpleBake` UV channel and the project texel-density target. Missing or invalid
 second UV channels safely fall back to the configured default resolution. The
-Bake stage provides queue-wide `÷2` and `×2` controls for quick test passes.
+Bake stage **Test** switch (100/75/50/25%) bakes the queue smaller for quick
+checks without touching the Setup resolutions; it is back at 100% when a file
+opens. A unit baked below its Setup resolution shows it in its status, and
+export warns about it.
 
 Beauty bake uses Cycles Combined at 256 samples by default, shared image targets,
 SimpleBake-style image-only compositor denoise, and a single PNG atlas per unit/state.

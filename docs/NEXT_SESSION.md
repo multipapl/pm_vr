@@ -113,3 +113,9 @@
 - Grouped-unit texel density is calculated correctly per member at the shared unit resolution, but the diagnostic does not yet detect UV overlap between different objects packed into that unit.
 - Scene Debug currently has one modal-controller state for the Blender process. This is reliable for the normal single-window workflow; true simultaneous multi-window debug sessions would need window-scoped controller state.
 - `pipeline/viewport_overlay.py` intentionally remains one module until the diagnostic engine settles. Split rendering/cache code from mode classifiers only after the real-scene test, so the refactor does not obscure functional regressions.
+
+## Resolution (2026-09-28)
+
+- 8192 removed everywhere (pipeline and legacy Lightmap Baker); stored enum value 5 is capped to 4096 on load/register (`cap_removed_resolutions`).
+- The ÷2/×2 buttons rewrote every queued unit's Setup resolution, with no way back. Replaced by `project.test_resolution` (100/75/50/25%, reset to 100% on load): `bake_resolution()` scales only what the queue bakes. Units record `day/evening_baked_resolution`; the unit status shows a result below Setup and export warns about it.
+- Regression: `tests/blender_resolution_smoke.py` (real 25% bake writes a 64 px PNG for a 256 unit, Setup unchanged, export warning, 100% rebake clears it, reopen resets).

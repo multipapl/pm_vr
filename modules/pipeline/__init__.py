@@ -36,6 +36,7 @@ def _load_post(_filepath):
     identity.remember_identity_owners()
     setup_ops.release_roleless_members()
     setup_ops.cap_removed_resolutions()
+    setup_ops.reset_test_resolution()
 
 
 def _separate_copies(force):

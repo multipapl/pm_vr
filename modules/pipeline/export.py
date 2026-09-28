@@ -16,6 +16,7 @@ from .generated import (
 )
 from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem
 from . import log
+from .setup_ops import baked_resolution
 from .state import activate_state
 
 
@@ -238,6 +239,22 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         if len(names) != len(set(names)):
             self.report({'ERROR'}, "Enabled render layers contain duplicate output names")
             return {'CANCELLED'}
+        # A test bake (or Setup raised after baking) is still a valid result;
+        # say so instead of shipping lower-resolution textures unnoticed.
+        state = project.active_lighting_state
+        exported_layers = {layer.layer_id for layer, _format_name in jobs}
+        below_setup = [
+            unit.display_name for unit in project.bake_units
+            if unit.render_layer_id in exported_layers
+            and 0 < baked_resolution(unit, state) < int(unit.resolution)
+        ]
+        if below_setup:
+            log.warning(
+                "Export",
+                f"{len(below_setup)} unit(s) baked below their Setup resolution: "
+                + ", ".join(f'"{name}"' for name in below_setup[:10])
+                + (f" and {len(below_setup) - 10} more" if len(below_setup) > 10 else ""),
+            )
         succeeded = skipped = failed = 0
         first_error = ""
         cancelled = False
@@ -279,10 +296,12 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"
+        if below_setup:
+            summary += f"; {len(below_setup)} unit(s) baked below Setup resolution"
         project.last_operation_summary = summary
         log.info("Export", summary)
         self.report(
-            {'WARNING'} if failed or cancelled else {'INFO'},
+            {'WARNING'} if failed or cancelled or below_setup else {'INFO'},
             summary + (f"; {first_error}" if first_error else ""),
         )
         return {'FINISHED'} if (succeeded or skipped) and not cancelled else {'CANCELLED'}

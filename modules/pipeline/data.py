@@ -319,6 +319,10 @@ class PMVR_BakeUnit(bpy.types.PropertyGroup):
     evening_lightmap_status: bpy.props.StringProperty(name="Evening Lightmap Status")
     day_status: bpy.props.StringProperty(name="Day Status")
     evening_status: bpy.props.StringProperty(name="Evening Status")
+    # Resolution the current Beauty result was baked at (0: before this was
+    # recorded). Lower than resolution means a test bake or a raised Setup.
+    day_baked_resolution: bpy.props.IntProperty(name="Day Baked Resolution", default=0, options={'HIDDEN'})
+    evening_baked_resolution: bpy.props.IntProperty(name="Evening Baked Resolution", default=0, options={'HIDDEN'})
     # "" follows the layer's scenario, SCENARIO_NONE bakes with the outliner
     # as it is, anything else is a scenario ID.
     bake_scenario_id: bpy.props.StringProperty(name="Bake Scenario ID", options={'HIDDEN'})
@@ -425,6 +429,20 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         update=_overlay_updated,
     )
 
+    test_resolution: bpy.props.EnumProperty(
+        name="Test Resolution",
+        description=(
+            "Bake the queue at a share of each unit's Setup resolution for a "
+            "quick check. Setup keeps its values; back to 100% when a file opens"
+        ),
+        items=(
+            ('100', "100%", "Bake at the resolutions set in Setup", 0),
+            ('75', "75%", "Bake at three quarters of the Setup resolution", 1),
+            ('50', "50%", "Bake at half the Setup resolution", 2),
+            ('25', "25%", "Bake at a quarter of the Setup resolution", 3),
+        ),
+        default='100',
+    )
     margin: bpy.props.IntProperty(name="Margin", default=16, min=0, soft_max=128)
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)
     default_unit_resolution: bpy.props.EnumProperty(

@@ -12,7 +12,27 @@ from .identity import (
     units_with_members,
 )
 from .scenarios import Scope, active_scenario, switched_off_count
-from .setup_ops import active_layer, active_unit, unassigned_visible_objects
+from .setup_ops import (
+    active_layer,
+    active_unit,
+    bake_resolution,
+    baked_resolution,
+    test_resolution_label,
+    unassigned_visible_objects,
+)
+
+
+def short_resolution(size):
+    return f"{size / 1024:g}K" if size >= 1024 else str(size)
+
+
+def beauty_status(unit, state):
+    status = (unit.day_status if state == 'DAY' else unit.evening_status) or "—"
+    baked = baked_resolution(unit, state)
+    if status == "Ready" and 0 < baked < int(unit.resolution):
+        # A test bake, or Setup raised after baking: rebake before export.
+        return f"Ready {short_resolution(baked)} (Setup {short_resolution(int(unit.resolution))})"
+    return status
 
 
 def draw_state_switch(layout, project):
@@ -76,8 +96,9 @@ class PMVR_UL_BakeQueue(bpy.types.UIList):
         right.prop(unit, "bake_scenario", text="")
         resolution = right.row(align=True)
         resolution.ui_units_x = 1.6
-        size = int(unit.resolution)
-        resolution.label(text=f"{size // 1024}K" if size >= 1024 else str(size))
+        # The size the queue will bake at; red while a test resolution is on.
+        resolution.alert = bool(test_resolution_label(context.scene.pm_vr_project))
+        resolution.label(text=short_resolution(bake_resolution(context.scene.pm_vr_project, unit)))
 
 
 class PMVR_UL_BakeScenarios(bpy.types.UIList):
@@ -222,8 +243,8 @@ def draw_bake_units(layout, project):
         members.operator("pmvr.assign_selected_to_unit", text="", icon='ADD')
         members.operator("pmvr.remove_selected_from_unit", text="", icon='REMOVE')
         status_row = detail.row(align=True)
-        status_row.label(text=f"Beauty D: {unit.day_status or '—'}")
-        status_row.label(text=f"E: {unit.evening_status or '—'}")
+        status_row.label(text=f"Beauty D: {beauty_status(unit, 'DAY')}")
+        status_row.label(text=f"E: {beauty_status(unit, 'EVENING')}")
         if SHOW_LIGHTMAP:
             lightmap_row = detail.row(align=True)
             lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
@@ -324,12 +345,11 @@ def draw_bake(layout, context):
     buttons = queue.row(align=True)
     buttons.operator("pmvr.queue_selected_units", icon='RESTRICT_SELECT_OFF')
     buttons.operator("pmvr.clear_bake_queue", icon='TRASH')
+    test = test_resolution_label(project)
     test_resolution = queue.row(align=True)
-    test_resolution.label(text="Test Resolution:")
-    op = test_resolution.operator("pmvr.scale_queued_resolution", text="÷2")
-    op.direction = 'HALF'
-    op = test_resolution.operator("pmvr.scale_queued_resolution", text="×2")
-    op.direction = 'DOUBLE'
+    test_resolution.alert = bool(test)
+    test_resolution.label(text="Test:")
+    test_resolution.prop(project, "test_resolution", expand=True)
     run = queue.row()
     run.scale_y = 1.4
     if project.operation_running:
@@ -337,7 +357,11 @@ def draw_bake(layout, context):
     else:
         run.operator(
             "pmvr.bake_queue",
-            text=f"Bake {len(project.bake_queue)} Queued Unit(s) • {mode_label}",
+            text=" • ".join(
+                [f"Bake {len(project.bake_queue)} Queued Unit(s)"]
+                + ([mode_label] if SHOW_LIGHTMAP or project.bake_mode != 'BEAUTY' else [])
+                + ([f"Test {test}"] if test else [])
+            ),
             icon='RENDER_STILL',
         )
     if project.last_operation_summary:
