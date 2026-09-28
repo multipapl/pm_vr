@@ -225,7 +225,12 @@ def _bake_outputs(context, material, plan, width, height):
         plane.select_set(True, view_layer=view_layer)
         view_layer.objects.active = plane
         for from_node, from_socket, _links in plan.outputs.values():
-            source = nodes[from_node.name].outputs[from_socket.identifier]
+            # Outputs are looked up by name; nodes like Mix have several
+            # "Result" outputs, so match the identifier.
+            source = next(
+                socket for socket in nodes[from_node.name].outputs
+                if socket.identifier == from_socket.identifier
+            )
             links.new(source, emission.inputs["Color"])
             with context.temp_override(
                 scene=scene, view_layer=view_layer, active_object=plane, object=plane,
