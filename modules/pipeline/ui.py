@@ -312,6 +312,7 @@ def draw_scenarios(layout, context, project):
         "PMVR_UL_ScenarioCollections", "", scenario, "collections",
         scenario, "active_collection_index", rows=5,
     )
+    body.label(text="Day/Evening collections follow the Lighting switch.", icon='LIGHT')
     layers = [layer for layer in project.render_layers if layer.layer_type in BAKE_LAYER_TYPES]
     if layers:
         defaults = body.column(align=True)
@@ -469,6 +470,7 @@ HELP_SECTIONS = (
         "Alpha: opacity from Principled Alpha or a Transparent mix",
         "Alpha opacity may come through a node group input",
         "Lighting Day/Evening (top): shows that state's bake",
+        "A lighting state switches on with all its nested collections",
         "Modifiers must not add or remove material slots",
         "Esc or Cancel Bake: stops the queue, current unit discarded",
         "Bake at 4K: bakes 4096, saves at unit size (sharper, slower)",
@@ -479,9 +481,9 @@ HELP_SECTIONS = (
         "+ saves the outliner as it is; Capture Outliner updates it",
         "Layer sets the default; a unit can override it",
         "Checked units change scenario together",
-        "Day/Evening collections follow the lighting state",
+        "Day/Evening collections follow the Lighting switch",
         "Disabling a collection disables everything inside it",
-        "New collections keep their outliner state until added",
+        "New collections join every scenario as they are in the outliner",
         "Outliner is restored after the queue, cancel or a crash",
         "A scenario must not disable the unit's own objects",
     )),

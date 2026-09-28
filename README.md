@@ -91,8 +91,10 @@ The queue switches collections before each unit and restores the outliner
 when it ends, is cancelled, or is interrupted (a file saved during the bake
 or recovered after a crash is restored on load). Day/Evening lighting
 collections and the collections that hold them are never switched by a
-scenario. Collections created after a scenario keep their outliner state
-until **Add** records them. The queue does not start when a scenario would
+scenario: the Lighting switch turns a state on with every collection nested
+in its lighting collection and turns the other state off whole. Collections
+created later join every scenario automatically, as they are in the outliner
+at that moment, and deleted ones leave. The queue does not start when a scenario would
 disable a unit's own objects; **Validate Pipeline** reports the same.
 
 Every semantic layer has one authoritative type: `Unlit`, `PBR`, `Alpha`,

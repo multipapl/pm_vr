@@ -288,6 +288,52 @@ def prune_scenarios():
     return removed
 
 
+_SCOPE_SIGNATURES = {}
+
+
+def sync_scenarios(force=False):
+    """Keep every scenario's list in step with the collections under Source
+    Root: new collections join with their current outliner state, deleted or
+    moved-out ones leave. Runs when the collection tree changes (and on load);
+    never while a queue runs."""
+    updated = 0
+    for scene in bpy.data.scenes:
+        project = getattr(scene, "pm_vr_project", None)
+        if (
+            not project
+            or not project.bake_scenarios
+            or project.operation_running
+            or not project.source_root_collection
+        ):
+            continue
+        context = bpy.context
+        view_layer = context.view_layer if context.scene == scene else scene.view_layers[0]
+        try:
+            scope = Scope(project, view_layer)
+        except PipelineBakeError:
+            continue
+        signature = tuple(key for key, _layer_collection, _depth in scope.entries())
+        if not force and _SCOPE_SIGNATURES.get(scene.name) == signature:
+            continue
+        _SCOPE_SIGNATURES[scene.name] = signature
+        for scenario in project.bake_scenarios:
+            before = {item.collection.name_full for item in scenario.collections if item.collection}
+            record(scenario, scope, keep_recorded=True)
+            after = {item.collection.name_full for item in scenario.collections}
+            if after != before:
+                updated += 1
+                added = sorted(after - before)
+                removed = sorted(before - after)
+                log.info(
+                    "Setup",
+                    f'Bake scenario "{scenario.display_name}": '
+                    + (f"added {', '.join(added)} (outliner state)" if added else "")
+                    + ("; " if added and removed else "")
+                    + (f"removed {', '.join(removed)}" if removed else ""),
+                )
+    return updated
+
+
 def switched_off_count(scenario):
     return sum(1 for item in scenario.collections if item.collection and not item.include)
 

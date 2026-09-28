@@ -81,6 +81,23 @@ Handled the same day:
 - The Setup resolution log names the object and says when the required size is above 4096 (texel density stays below target).
 - Texture limit and texture cache stay out of the add-on by the user's choice; they are managed in Blender. The texture cache shifts bounce light (see the pipeline document on the user's Desktop).
 
+## Task list (2026-09-28, waiting for the user's go)
+
+1. **Lighting switch leaves nested collections off.** `activate_state()` sets Exclude only on the Day/Evening collection. Blender's recursive Exclude remembers children that were excluded before the parent ("previously excluded") and keeps them off when the parent is re-enabled, so nested light groups stay off, also during queue bakes. Plan: activating a state includes its lighting collection with every nested collection, the other state's collection is excluded whole; the switch owns Exclude inside lighting collections (to leave a group out, move it out or disable its render). Test with nested collections and remembered exclusions. Inspect UniPlace read-only for nested lighting collections that were off during the last bakes and tell the user which states/units need a rebake. Rule confirmed by the user: whatever is in a lighting collection is switched on with all its nested collections. **Done:** `activate_state()` switches each lighting subtree whole (`_switch_subtree`). On UniPlace the nested groups Shelfs (48 lamps), Stairs_Daylight (95), LampsLR_Day, SkyboxDaylight and Stairs_Night (95), Shelfs_Night (48), LampsLR_Night, SkyboxNight were off after every switch; bakes made in that state miss them. Scenario lists now follow the collection tree (`sync_scenarios` on depsgraph updates when the tree changes, and on load); lighting subtrees stay out of scenarios.
+2. **Bake resolution vs export resolution**, see below; confirm the open decisions first.
+3. Optional: measure packed vs unpacked textures on one unit (memory, time). Expected: packed images always sit in RAM (compressed) and cannot use the texture cache.
+- User side: bake with BlenderKit and Megascans Plugin disabled to find the console "Python context internal state bug"; check the 92 units' resolutions changed by the old ÷2/×2.
+
+## Planned next: bake resolution vs export resolution (agreed 2026-09-28, not started)
+
+The user's SimpleBake habit, automated: bake decides the light, export decides the budget (Vision Pro ~8 GB per app, mostly textures).
+- **Project Settings: Bake Resolution** (default 4096). Every unit bakes at it (times the Test share) and is denoised there. This replaces the Bake at 4K checkbox.
+- **Master files:** the full-size denoised Beauty PNG is kept on disk (own folder) per unit and state.
+- **Export copy:** derived from the master at the unit's resolution (downscale in linear light, existing `downscale_staged_beauty`). Blender's generated materials show this copy (what you see is what ships; 250 masters at 4K would be ~16 GB in Material Preview) and USDZ/GLB embed it. The Mac side is unchanged.
+- **Changing a unit's resolution** re-derives its copy from the master; the unit stays Ready, no rebake.
+- **Open decisions:** test bakes (25–50%) must not overwrite masters (separate place, or marked and replaced by the next full bake); when copies regenerate (on resolution change and/or at export); how the unit status shows master vs export size.
+- **Cost estimate for UniPlace:** bake time ~1.8x (about 16 h to 29 h for both states at 256 samples); downscaled units could use fewer samples. Masters ~15 MB each, ~7.5 GB for both states.
+
 ## Audit follow-ups not changed
 
 - Export Original children of a baked parent keep the source parent as a transform-only USD Xform; GLB flattens them to the root. World transforms are correct in both.

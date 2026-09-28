@@ -57,14 +57,26 @@ def validate_state_configuration(context):
     return day_layer, evening_layer
 
 
+def _switch_subtree(layer_collection, exclude):
+    """Set Exclude on a lighting collection and everything inside it, parents
+    first. Blender re-enables a child only if it was on when its parent was
+    switched off, so nested light groups created or switched off while their
+    state was inactive stayed off; a lighting state always comes on whole."""
+    if layer_collection.exclude != exclude:
+        layer_collection.exclude = exclude
+    for child in layer_collection.children:
+        _switch_subtree(child, exclude)
+
+
 def activate_state(context, state):
     project = context.scene.pm_vr_project
     day_layer, evening_layer = validate_state_configuration(context)
     world = project.day_world if state == 'DAY' else project.evening_world
     if world is None:
         raise PipelineStateError(f"Choose the {state.title()} World in Project Settings")
-    day_layer.exclude = state != 'DAY'
-    evening_layer.exclude = state != 'EVENING'
+    active, other = (day_layer, evening_layer) if state == 'DAY' else (evening_layer, day_layer)
+    _switch_subtree(other, True)
+    _switch_subtree(active, False)
     context.scene.world = world
     project.active_lighting_state = state
     return state
