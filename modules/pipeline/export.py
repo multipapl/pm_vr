@@ -9,7 +9,7 @@ import uuid
 import bpy
 
 from .. import collection_export
-from .bake_files import png_size, scale_atlas
+from .bake_files import png_size, scale_atlas, write_swatch
 from .bake_scene import PipelineBakeError
 from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .generated import (
@@ -17,8 +17,8 @@ from .generated import (
     restore_generated_bindings,
     snapshot_generated_bindings,
 )
-from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem
-from . import log
+from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem, unit_members
+from . import log, variants
 from .setup_ops import baked_resolution
 from .state import activate_state
 
@@ -232,6 +232,141 @@ def _temporary_export_path(final_path):
     return folder, os.path.join(folder, filename)
 
 
+def _unit_generated(project, unit, index):
+    members = unit_members(unit.unit_id)
+    return _generated_for_source(members[0], unit.unit_id, index) if len(members) == 1 else None
+
+
+@contextmanager
+def _variant_marker(unit):
+    """The unit's marker as an Empty named exactly VariantMarker (the name
+    the app looks for), for the length of one export."""
+    marker = unit.variant_marker
+    if not marker:
+        yield []
+        return
+    if marker.name == variants.MARKER_NAME:
+        yield [marker]
+        return
+    holder = bpy.data.objects.get(variants.MARKER_NAME)
+    if holder:
+        holder.name = f"{variants.MARKER_NAME}__pmvr_{uuid.uuid4().hex[:6]}"
+    temporary = bpy.data.objects.new(variants.MARKER_NAME, None)
+    temporary.matrix_world = marker.matrix_world.copy()
+    try:
+        yield [temporary]
+    finally:
+        bpy.data.objects.remove(temporary)
+        if holder:
+            holder.name = variants.MARKER_NAME
+
+
+def _export_variants(context, project, layer, state, textures):
+    """Variants/<Object>_<Variant>[_Evening].usdz for the layer's units with
+    variants: the generated object itself (so its name is the scene's) with
+    the variant's baked colour, plus swatches. Returns (written, problems)."""
+    units = [unit for unit in project.bake_units if unit.render_layer_id == layer.layer_id and len(unit.variants)]
+    if not units:
+        return 0, []
+    staging = os.path.dirname(variants.staging_folder(project))
+    index = _generated_beauty_index()
+    written, problems = 0, []
+    for unit in units:
+        problem = variants.variant_problem(project, unit)
+        generated = None if problem else _unit_generated(project, unit, index)
+        if problem or not generated:
+            problems.append(f'"{unit.display_name}": {problem or "generated object is missing"}')
+            continue
+        entity = variants.usd_name(generated.name)
+        day_image = bpy.data.images.get(unit.day_beauty_image)
+        if day_image and os.path.exists(bpy.path.abspath(day_image.filepath)):
+            write_swatch(bpy.path.abspath(day_image.filepath), os.path.join(staging, variants.swatch_path(entity)))
+        for variant in unit.variants:
+            if variants.variant_status(unit, variant, 'DAY') == "Ready":
+                write_swatch(
+                    bpy.path.abspath(variant.day_file),
+                    os.path.join(staging, variants.swatch_path(entity, variant)),
+                )
+            status = variants.variant_status(unit, variant, state)
+            if status != "Ready":
+                problems.append(
+                    f'"{unit.display_name}" variant "{variant.title}": '
+                    + (f"no {state.title()} bake" if not status else "baked before the unit's last bake; rebake the unit")
+                )
+                continue
+            image = bpy.data.images.load(bpy.path.abspath(variants.variant_file(variant, state)), check_existing=False)
+            # Tagged like a Beauty atlas, so export scales it to the unit's resolution.
+            image[TAG_GENERATED] = True
+            image[TAG_UNIT_ID] = unit.unit_id
+            image[TAG_MODE] = 'BEAUTY'
+            bound = list(generated.data.materials)
+            copies = []
+            try:
+                for slot, material in enumerate(bound):
+                    if not material:
+                        continue
+                    copy = material.copy()
+                    copies.append(copy)
+                    for node in copy.node_tree.nodes if copy.node_tree else ():
+                        if (
+                            node.type == 'TEX_IMAGE' and node.image
+                            and node.image.get(TAG_MODE) == 'BEAUTY'
+                            and node.image.get(TAG_UNIT_ID) == unit.unit_id
+                        ):
+                            node.image = image
+                    generated.data.materials[slot] = copy
+                final_path = os.path.join(staging, variants.model_path(entity, variant, state))
+                with _variant_marker(unit) as marker:
+                    _write_usdz(context, project, layer, [generated, *marker], final_path, textures)
+                written += 1
+            finally:
+                for slot, material in enumerate(bound):
+                    generated.data.materials[slot] = material
+                for copy in copies:
+                    bpy.data.materials.remove(copy)
+                bpy.data.images.remove(image)
+    return written, problems
+
+
+def _write_usdz(context, project, layer, objects, final_path, textures):
+    folder, temporary_path = _temporary_export_path(final_path)
+    assembly = _make_assembly(context.scene, layer, objects)
+    render_disabled = [obj for obj in objects if obj.hide_render]
+    try:
+        for obj in render_disabled:
+            obj.hide_render = False
+        with textures.scaled(project, objects):
+            result = collection_export.export_usdz(assembly, temporary_path)
+        if 'FINISHED' not in result or not os.path.exists(temporary_path):
+            raise PipelineExportError(f"Blender did not produce {os.path.basename(final_path)}")
+        os.replace(temporary_path, final_path)
+    finally:
+        for obj in render_disabled:
+            obj.hide_render = True
+        _remove_assembly(context.scene, assembly)
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def write_variant_manifest(project, layers):
+    """Variants/materialVariants.json for the variant units of the layers
+    (their Day files are the models). None when nothing to write."""
+    staging = bpy.path.abspath(project.usdz_output_directory)
+    index = _generated_beauty_index()
+    entries = []
+    for unit in project.bake_units:
+        if unit.render_layer_id not in layers or not len(unit.variants):
+            continue
+        if variants.variant_problem(project, unit):
+            continue
+        generated = _unit_generated(project, unit, index)
+        entry = generated and variants.manifest_entry(unit, variants.usd_name(generated.name), staging)
+        if entry:
+            entries.append(entry)
+    if not entries and not os.path.isdir(os.path.join(staging, variants.FOLDER)):
+        return None
+    return variants.write_manifest(staging, entries), len(entries)
+
+
 def export_semantic_layer(context, layer, format_name, textures=None):
     project = context.scene.pm_vr_project
     # Export binds the active state's materials to canonical generated objects;
@@ -267,6 +402,14 @@ def export_semantic_layer(context, layer, format_name, textures=None):
             raise PipelineExportError(f"Blender did not produce {format_name}")
         os.replace(temporary_path, final_path)
         log.info("Export", f"{layer.display_name} ({format_name}): {len(objects)} object(s) -> {final_path}")
+        if format_name == 'USDZ' and layer.layer_type == 'UNLIT':
+            written, problems = _export_variants(
+                context, project, layer, project.active_lighting_state, textures
+            )
+            if written:
+                log.info("Export", f"{layer.display_name}: {written} variant file(s) in {variants.FOLDER}/")
+            for problem in problems:
+                log.warning("Export", f"Variant not exported: {problem}")
         return "SUCCESS", final_path
     finally:
         _remove_assembly(context.scene, assembly)
@@ -378,6 +521,10 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             textures.cleanup()
         if scaled:
             log.info("Export", f"Atlases scaled to unit resolution: {scaled}")
+        if 'USDZ' in formats:
+            manifest = write_variant_manifest(project, exported_layers)
+            if manifest:
+                log.info("Export", f"Material variants: {manifest[1]} object(s) -> {manifest[0]}")
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"

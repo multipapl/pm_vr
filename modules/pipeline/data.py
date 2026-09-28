@@ -287,6 +287,30 @@ class PMVR_RenderLayer(bpy.types.PropertyGroup):
     )
 
 
+def _is_empty(_self, obj):
+    return obj.type == 'EMPTY'
+
+
+class PMVR_BakeVariant(bpy.types.PropertyGroup):
+    """A material variant of a bake unit: baked like the unit with its
+    material in place of the unit's variant material (see variants.py)."""
+
+    variant_id: bpy.props.StringProperty(name="Variant ID", options={'HIDDEN'})
+    title: bpy.props.StringProperty(
+        name="Name",
+        description="Title on the variant card; also part of the file name",
+    )
+    material: bpy.props.PointerProperty(
+        name="Material",
+        type=bpy.types.Material,
+        description="Takes the place of the unit's variant material while this variant bakes",
+    )
+    day_file: bpy.props.StringProperty(name="Day File", options={'HIDDEN'})
+    evening_file: bpy.props.StringProperty(name="Evening File", options={'HIDDEN'})
+    day_signature: bpy.props.StringProperty(name="Day Signature", options={'HIDDEN'})
+    evening_signature: bpy.props.StringProperty(name="Evening Signature", options={'HIDDEN'})
+
+
 class PMVR_BakeUnit(bpy.types.PropertyGroup):
     unit_id: bpy.props.StringProperty(name="Unit ID", options={'HIDDEN'})
     display_name: bpy.props.StringProperty(name="Name", default="Bake Unit")
@@ -323,6 +347,23 @@ class PMVR_BakeUnit(bpy.types.PropertyGroup):
     # recorded). Lower than resolution means a test bake or a raised Setup.
     day_baked_resolution: bpy.props.IntProperty(name="Day Baked Resolution", default=0, options={'HIDDEN'})
     evening_baked_resolution: bpy.props.IntProperty(name="Evening Baked Resolution", default=0, options={'HIDDEN'})
+    variants: bpy.props.CollectionProperty(type=PMVR_BakeVariant)
+    variant_material: bpy.props.PointerProperty(
+        name="Changes",
+        type=bpy.types.Material,
+        description="The object's material that each variant replaces",
+    )
+    variant_default_title: bpy.props.StringProperty(
+        name="Default",
+        default="Default",
+        description="Title on the card of the object as it is",
+    )
+    variant_marker: bpy.props.PointerProperty(
+        name="Marker",
+        type=bpy.types.Object,
+        poll=_is_empty,
+        description="Optional Empty where the variant button appears; exported as VariantMarker",
+    )
     # "" follows the layer's scenario, SCENARIO_NONE bakes with the outliner
     # as it is, anything else is a scenario ID.
     bake_scenario_id: bpy.props.StringProperty(name="Bake Scenario ID", options={'HIDDEN'})
@@ -453,7 +494,19 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         items=RESOLUTION_ITEMS,
         default='4096',
     )
-    margin: bpy.props.IntProperty(name="Margin", default=16, min=0, soft_max=128)
+    uv_padding: bpy.props.FloatProperty(
+        name="Island Padding",
+        description=(
+            "Space between UV islands, in UV units, as set in the packer "
+            "(UVPackmaster Margin). The bake margin fills that gap at any "
+            "resolution and never paints over a neighbouring island"
+        ),
+        default=0.002,
+        min=0.0,
+        soft_max=0.02,
+        step=0.01,
+        precision=4,
+    )
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)
     default_unit_resolution: bpy.props.EnumProperty(
         name="Default Unit Resolution",
@@ -499,6 +552,7 @@ CLASSES = (
     PMVR_ExtraExportLayer,
     PMVR_ObjectMetadata,
     PMVR_RenderLayer,
+    PMVR_BakeVariant,
     PMVR_BakeUnit,
     PMVR_ScenarioCollection,
     PMVR_BakeScenario,

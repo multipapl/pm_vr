@@ -6,12 +6,14 @@ from .bake_scene import PipelineBakeError
 from .constants import BAKE_LAYER_TYPES
 from .identity import (
     extra_export_members,
+    find_layer,
     find_unit,
     layer_members,
     unit_members,
     units_with_members,
 )
 from .scenarios import Scope, active_scenario, switched_off_count
+from .variants import variant_problem, variant_status
 from .setup_ops import (
     active_layer,
     active_unit,
@@ -91,7 +93,7 @@ class PMVR_UL_BakeQueue(bpy.types.UIList):
             layout.label(text="Missing unit", icon='ERROR')
             return
         split = layout.split(factor=0.35, align=True)
-        split.label(text=unit.display_name)
+        split.label(text=unit.display_name + (f" +{len(unit.variants)} var." if len(unit.variants) else ""))
         right = split.row(align=True)
         right.prop(unit, "bake_scenario", text="")
         resolution = right.row(align=True)
@@ -215,6 +217,38 @@ def draw_original_objects(layout, layer, objects, can_add=True):
     box.label(text="Not baked: exported as they are.", icon='INFO')
 
 
+def draw_variants(layout, project, unit):
+    """Material variants of the unit: one small button until there are any."""
+    layer = find_layer(project, unit.render_layer_id)
+    if not len(unit.variants):
+        if layer and layer.layer_type == 'UNLIT':
+            layout.operator("pmvr.add_bake_variant", text="Add Variant", icon='MATERIAL')
+        return
+    box = layout.box()
+    header = box.row(align=True)
+    header.label(text="Material Variants", icon='MATERIAL')
+    header.operator("pmvr.add_bake_variant", text="", icon='ADD')
+    problem = variant_problem(project, unit)
+    if problem:
+        row = box.row()
+        row.alert = True
+        row.label(text=problem[:1].upper() + problem[1:], icon='ERROR')
+    box.prop(unit, "variant_material")
+    box.prop(unit, "variant_default_title")
+    for index, variant in enumerate(unit.variants):
+        row = box.row(align=True)
+        row.prop(variant, "title", text="")
+        row.prop(variant, "material", text="")
+        states = [variant_status(unit, variant, state) for state in ('DAY', 'EVENING')]
+        status = row.row(align=True)
+        status.ui_units_x = 1.6
+        status.alert = "Rebake" in states
+        status.label(text=("D" if states[0] else "·") + ("E" if states[1] else "·"))
+        op = row.operator("pmvr.remove_bake_variant", text="", icon='X')
+        op.index = index
+    box.prop(unit, "variant_marker")
+
+
 def draw_bake_units(layout, project):
     occupied = units_with_members()
     _OCCUPIED_UNITS.clear()
@@ -256,6 +290,7 @@ def draw_bake_units(layout, project):
         row = detail.row(align=True)
         op = row.operator("pmvr.select_pipeline_items", text="Select Sources")
         op.target = 'UNIT_SOURCES'
+        draw_variants(detail, project, unit)
 
 
 def draw_scenarios(layout, context, project):
@@ -471,6 +506,8 @@ HELP_SECTIONS = (
         "Relative output folders (//): save the .blend first",
         "Unit members: all visible or all hidden in the state",
         "PBR: one Principled BSDF per material slot",
+        "PBR colour corrections: Shader Editor, Flatten to Texture",
+        "Island Padding (Project Settings): same as in the UV packer",
         "Alpha: opacity from Principled Alpha or a Transparent mix",
         "Alpha opacity may come through a node group input",
         "Lighting Day/Evening (top): shows that state's bake",
@@ -480,6 +517,9 @@ HELP_SECTIONS = (
         "Bake Resolution (Project Settings): size of the baked files",
         "Unit resolution can change after a bake: no rebake needed",
         "Layers and units are locked while baking",
+        "Unit Add Variant: material variants (Unlit, one object)",
+        "Variants bake after their unit, per lighting state",
+        "Variant row DE: baked for Day / Evening; red: rebake",
     )),
     ("Bake scenarios", 'OUTLINER_COLLECTION', (
         "Scenario: collections on/off inside Source Root for a bake",
@@ -495,6 +535,7 @@ HELP_SECTIONS = (
     ("Export", 'EXPORT', (
         "Every unit needs a Ready Beauty for the active state",
         "Atlases scale to unit resolution (linear light, colour kept)",
+        "Variants: USDZ/Variants/<Object>_<Variant>.usdz, swatch, JSON",
         "Day and Evening must have matching structure",
         "Additional exports: same layer type only",
         "Selection and visibility are ignored: all assigned objects export",

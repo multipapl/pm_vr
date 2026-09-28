@@ -643,6 +643,18 @@ def bake_size(project, unit):
     return _test_share(project, max(int(project.bake_resolution), int(unit.resolution)))
 
 
+def bake_margin(project, size, objects=1):
+    """Bake margin in pixels for an image of size: the island padding the UVs
+    were packed with. Objects of a unit bake one after another into one
+    image, and each object's margin paints every pixel it reaches that is
+    not its own, a neighbour's island too; with several objects each fills
+    half the gap, so neighbours meet in the middle."""
+    gap = project.uv_padding * size
+    if gap <= 0.0:
+        return 0
+    return max(1, int(gap / 2 if objects > 1 else gap))
+
+
 def queue_bake_size(project):
     """What the queue bakes units at (larger units bake at their own)."""
     return _test_share(project, project.bake_resolution)
@@ -1136,7 +1148,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         bake.prop(project, "bake_resolution")
         bake.prop(project, "default_unit_resolution")
         bake.prop(context.scene, "pm_vr_target_td", text="Target TD px/cm")
-        bake.prop(project, "margin")
+        bake.prop(project, "uv_padding")
         bake.prop(project, "cycles_samples")
         bake.prop(project, "beauty_output_directory")
         bake.prop(project, "lightmap_output_directory")

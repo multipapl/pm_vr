@@ -1,7 +1,6 @@
 """Bake queue: Beauty unit runtime, Lightmap units and the modal queue operator."""
 
 from datetime import datetime
-import math
 import time
 import uuid
 
@@ -12,6 +11,7 @@ from ..lightmap_baker.images import create_float_image, remove_image
 from ..lightmap_baker.progress import BakeProgressFeedback
 from ..lightmap_baker.state import ContextState
 from .bake_files import (
+    _blend_relative,
     beauty_image_name,
     commit_staged_file,
     stage_beauty_image,
@@ -47,8 +47,8 @@ from .generated import (
 )
 from .identity import find_layer, find_unit, unit_members
 from .scenarios import ScenarioSession, preflight as scenario_preflight
-from .setup_ops import bake_size, lightmap_resolution, preview_state, test_resolution_label
-from . import log, viewport_overlay
+from .setup_ops import bake_margin, bake_size, lightmap_resolution, preview_state, test_resolution_label
+from . import log, variants, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
 
@@ -72,12 +72,16 @@ def _show_bake_stage(operator, message, step, step_count):
 
 
 class BeautyBakeRuntime:
-    """One prepared Beauty unit, advanced by the modal queue operator."""
+    """One prepared Beauty unit, advanced by the modal queue operator. With a
+    variant_id it bakes that material variant of the unit instead: the same
+    copies with the variant's material, only the PNG is kept."""
 
-    def __init__(self, context, unit, operator=None):
+    def __init__(self, context, unit, operator=None, variant_id=""):
         self.context = context
         self.project = context.scene.pm_vr_project
         self.unit_id = unit.unit_id
+        self.variant_id = variant_id
+        self.variant = None
         self.operator = operator
         self.state = self.project.active_lighting_state
         self._resolve()
@@ -106,6 +110,13 @@ class BeautyBakeRuntime:
         self.layer = find_layer(self.project, self.unit.render_layer_id)
         if not self.layer:
             raise PipelineBakeError(f'unit "{self.unit.display_name}" has no render layer')
+        if self.variant_id:
+            self.variant = variants.find_variant(self.unit, self.variant_id)
+            if not self.variant:
+                raise PipelineBakeError("the variant was removed during the bake")
+
+    def _unit_signature(self):
+        return self.unit.day_signature if self.state == 'DAY' else self.unit.evening_signature
 
     def prepare(self):
         issues = validate_unit(self.context, self.unit, require_visible=True)
@@ -119,6 +130,17 @@ class BeautyBakeRuntime:
         ]
         if not visible:
             return "SKIPPED"
+        material_map = None
+        if self.variant:
+            problem = variants.variant_problem(self.project, self.unit)
+            if problem:
+                raise PipelineBakeError(problem)
+            status = self.unit.day_status if self.state == 'DAY' else self.unit.evening_status
+            if not self._unit_signature() or status != "Ready":
+                raise PipelineBakeError(
+                    f"the unit has no {self.state.title()} bake; its variants bake after it"
+                )
+            material_map = {self.unit.variant_material.name_full: self.variant.material}
 
         self.work_collection = pipeline_collection(WORK_COLLECTION)
         ensure_scene_collection(self.context.scene, self.work_collection)
@@ -133,10 +155,10 @@ class BeautyBakeRuntime:
         # resolution (or ships it as is when smaller, a test bake).
         self.bake_size = bake_size(self.project, self.unit)
         self.resolution = min(int(self.unit.resolution), self.bake_size)
-        # The margin is meant in exported pixels; a larger bake scales it.
-        self.margin = math.ceil(self.project.margin * self.bake_size / self.resolution)
+        self.margin = bake_margin(self.project, self.bake_size, len(self.members))
         self.image = create_float_image(
-            beauty_image_name(self.layer, self.unit, self.state),
+            beauty_image_name(self.layer, self.unit, self.state)
+            + (f"_{variants.variant_stem(self.variant)}" if self.variant else ""),
             self.bake_size,
         )
         try:
@@ -158,12 +180,17 @@ class BeautyBakeRuntime:
                     self.work_collection,
                     self.image,
                     self.layer.layer_type,
+                    material_map,
                 )
             )
         self.signature = signature_for_receivers(
             self.receivers,
             self.layer.layer_type,
         )
+        if self.variant and self.signature != self._unit_signature():
+            raise PipelineBakeError(
+                "the unit changed since its bake; rebake the unit (its variants bake with it)"
+            )
         all_passes = {
             'DIRECT', 'INDIRECT', 'COLOR', 'DIFFUSE',
             'GLOSSY', 'TRANSMISSION', 'EMIT',
@@ -172,12 +199,14 @@ class BeautyBakeRuntime:
         self.config.configure('COMBINED', self.margin, False, all_passes)
         log.info(
             "Beauty",
-            f'Start {self.state.title()} unit "{self.unit.display_name}": '
+            f'Start {self.state.title()} unit "{self.unit.display_name}"'
+            + (f' variant "{self.variant.title}"' if self.variant else '')
+            + ': '
             f'{len(self.receivers)} object(s), {self.bake_size}px'
             + (f' (test {test_resolution_label(self.project)})' if test_resolution_label(self.project) else '')
             + f', exports at {self.resolution}px'
             + (f' (Setup {self.unit.resolution}px)' if self.resolution != int(self.unit.resolution) else '')
-            + f', {self.project.cycles_samples} samples',
+            + f', margin {self.margin}px, {self.project.cycles_samples} samples',
         )
         return "READY"
 
@@ -208,8 +237,45 @@ class BeautyBakeRuntime:
             "normal_b": bake.normal_b,
         })
 
+    def _finish_variant(self):
+        """Keep the variant's PNG; the unit's generated result is untouched."""
+        step_count = len(self.receivers) + 2
+        _show_bake_stage(self.operator, "Save external Beauty", len(self.receivers) + 1, step_count)
+        staged_file = stage_beauty_image(
+            self.context, self.unit, self.state, self.image, variants.variant_stem(self.variant)
+        )
+        try:
+            _show_bake_stage(self.operator, "Compositor denoise", len(self.receivers) + 2, step_count)
+            try:
+                denoise_external_beauty(self.context.scene, self.image, staged_file.staging_path)
+            except Exception as exc:
+                self.warnings.append(f"denoise failed, raw Beauty used: {exc}")
+                log.warning(
+                    "Beauty",
+                    f'{self.unit.display_name} variant "{self.variant.title}": denoise failed; using raw Beauty: {exc}',
+                )
+            commit_staged_file(staged_file, self.image, 'PNG')
+        finally:
+            staged_file.cleanup()
+        staged_file.finalize()
+        log.info("Beauty", f'Saved external image: "{staged_file.final_path}"')
+        variants.set_result(self.variant, self.state, _blend_relative(staged_file.final_path), self.signature)
+        _record(
+            self.project, self.unit, self.state, self.signature, self.image,
+            "SUCCESS", "; ".join([f'variant "{self.variant.title}"', *self.warnings]),
+        )
+        self.finished = True
+        log.info(
+            "Beauty",
+            f'Completed {self.state.title()} unit "{self.unit.display_name}" variant '
+            f'"{self.variant.title}" in {log.duration(time.monotonic() - self.started_at)}',
+        )
+        self.cleanup(keep_image=False)
+
     def finish(self):
         self._resolve()
+        if self.variant:
+            return self._finish_variant()
         step_count = len(self.receivers) + 3
         _show_bake_stage(
             self.operator,
@@ -363,6 +429,8 @@ class BeautyBakeRuntime:
 
     def fail(self, exc):
         label = self._label()
+        if label is not None and self.variant:
+            label = f'{label}" variant "{self.variant.title}'
         # Validation and transaction errors explain themselves; anything else
         # is a bug and needs its traceback. fail() is called from except blocks.
         log.error(
@@ -379,7 +447,7 @@ class BeautyBakeRuntime:
                 "",
                 self.image,
                 "FAILED",
-                str(exc),
+                (f'variant "{self.variant.title}": ' if self.variant else "") + str(exc),
             )
         self.cleanup(keep_image=False)
 
@@ -489,13 +557,14 @@ def bake_lightmap_unit(context, unit, operator=None):
                 copy_receiver(context, source, work_collection, raw, 'LIGHTMAP')
             )
         signature = signature_for_receivers(receivers, 'LIGHTMAP')
+        margin = bake_margin(project, resolution, len(receivers))
         _show_bake_stage(operator, "Lightmap / Lighting", 1, 5)
         bake_receivers(
             context,
             receivers,
             raw,
             'DIFFUSE',
-            project.margin,
+            margin,
             {'DIRECT', 'INDIRECT'},
         )
         context.scene.cycles.samples = 1
@@ -506,11 +575,11 @@ def bake_lightmap_unit(context, unit, operator=None):
                 receivers,
                 albedo,
                 'DIFFUSE',
-                project.margin,
+                margin,
                 {'COLOR'},
             )
             _show_bake_stage(operator, "Denoise guide / Normal", 3, 5)
-            bake_receivers(context, receivers, normal, 'NORMAL', project.margin)
+            bake_receivers(context, receivers, normal, 'NORMAL', margin)
         finally:
             context.scene.cycles.samples = project.cycles_samples
         try:
@@ -725,7 +794,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             "Bake",
             f"Queue start: {len(project.bake_queue)} unit(s), "
             f"states {', '.join(states)}, mode {project.bake_mode}, "
-            f"{project.cycles_samples} samples, margin {project.margin}px, "
+            f"{project.cycles_samples} samples, island padding {project.uv_padding:g}, "
             f"Bake Resolution {project.bake_resolution}px"
             + (
                 f", TEST {test_resolution_label(project)}"
@@ -747,9 +816,13 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         self._project = project
         self._states = states
         self._original_state = project.active_lighting_state
-        self._jobs = [
-            (state, unit_id) for state in states for unit_id in entries
-        ]
+        self._jobs = []
+        for state in states:
+            for unit_id in entries:
+                self._jobs.append((state, unit_id, ""))
+                unit = find_unit(project, unit_id)
+                for variant in (unit.variants if unit else ()):
+                    self._jobs.append((state, unit_id, variant.variant_id))
         self._job_cursor = 0
         self._current_runtime = None
         self._receiver_index = 0
@@ -891,26 +964,28 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             if self._cancel_requested or _QUEUE["cancel_requested"]:
                 self._request_cancel(self._cancel_reason or "Cancel button")
                 return self._finish_modal(context, cancelled=True)
-            state, unit_id = self._jobs[self._job_cursor]
+            state, unit_id, variant_id = self._jobs[self._job_cursor]
             self._job_cursor += 1
             self._project.operation_progress = (
                 (self._job_cursor - 1) / max(1, len(self._jobs))
             )
             context.window_manager.progress_update(self._job_cursor - 1)
             unit = find_unit(self._project, unit_id)
+            variant = variants.find_variant(unit, variant_id) if unit and variant_id else None
             self._feedback.begin_object(
-                f"{state.title()} — {unit.display_name if unit else 'Missing unit'}",
+                f"{state.title()} — {unit.display_name if unit else 'Missing unit'}"
+                + (f" — {variant.title}" if variant else ""),
                 self._job_cursor,
                 len(self._jobs),
             )
-            if not unit:
+            if not unit or (variant_id and not variant):
                 self._skipped += 1
                 self._feedback.complete_object()
                 continue
             try:
                 activate_state(context, state)
                 self._scenarios.apply(context, unit)
-                runtime = BeautyBakeRuntime(context, unit, self)
+                runtime = BeautyBakeRuntime(context, unit, self, variant_id)
                 # Own the runtime before preparation starts. Preparation can
                 # fail after it has hidden sources, changed bake settings, or
                 # created PMVR_WORK data, and must always be cleaned up.

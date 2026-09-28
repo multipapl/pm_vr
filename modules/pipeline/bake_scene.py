@@ -439,7 +439,7 @@ def set_target_image(receiver, image):
         node.id_data.nodes.active = node
 
 
-def copy_receiver(context, source, work_collection, image, receiver_type):
+def copy_receiver(context, source, work_collection, image, receiver_type, material_map=None):
     source_uvs = source.data.uv_layers
     primary_source_uv = source_uvs.get(PRIMARY_UV_NAME)
     if not primary_source_uv:
@@ -472,6 +472,10 @@ def copy_receiver(context, source, work_collection, image, receiver_type):
     if not evaluated_materials:
         evaluated_materials = [None]
     for index, source_material in enumerate(evaluated_materials):
+        # A material variant bakes with its material in place of the one it
+        # replaces, on the copy only; the source is never changed.
+        if material_map and source_material and source_material.name_full in material_map:
+            source_material = material_map[source_material.name_full]
         material = source_material.copy() if source_material else make_fallback_material(f"__PMVR_WORK_MAT_{uuid.uuid4().hex}")
         material.name = f"__PMVR_WORK_MAT_{uuid.uuid4().hex}"
         if receiver_type == 'LIGHTMAP':

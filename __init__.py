@@ -13,6 +13,7 @@ from .modules import lightmap_baker
 from .modules import checker_preview
 from .modules import collection_export
 from .modules import material_rebuild
+from .modules import node_flatten
 from .modules import pipeline
 from .modules import vr_project_tools
 
@@ -28,7 +29,7 @@ bl_info = {
 }
 
 
-MODULES = (lightmap_baker, checker_preview, vr_project_tools, material_rebuild, collection_export, pipeline)
+MODULES = (lightmap_baker, checker_preview, vr_project_tools, material_rebuild, collection_export, pipeline, node_flatten)
 
 
 def _ui_stage_changed(ui_state, _context):

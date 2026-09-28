@@ -16,6 +16,7 @@ from . import (
     selection_sync,
     setup_ops,
     ui,
+    variants,
     viewport_overlay,
 )
 
@@ -74,7 +75,7 @@ _HANDLERS = (
 
 
 def register():
-    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES):
+    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES):
         bpy.utils.register_class(cls)
     data.register_properties()
     selection_sync.register()
@@ -107,7 +108,7 @@ def unregister():
     viewport_overlay.unregister()
     selection_sync.unregister()
     data.unregister_properties()
-    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES)):
+    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES)):
         bpy.utils.unregister_class(cls)
 
 

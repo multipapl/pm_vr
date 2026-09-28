@@ -45,10 +45,10 @@ def _point_image_at_file(image, filepath, file_format):
     image.reload()
 
 
-def _beauty_final_path(context, unit, state):
+def _beauty_final_path(context, unit, state, variant=""):
     project = context.scene.pm_vr_project
     directory = _output_directory(project.beauty_output_directory, "Beauty")
-    suffix = "" if state == 'DAY' else "_Evening"
+    suffix = ("" if not variant else f"_{safe_stem(variant)}") + ("" if state == 'DAY' else "_Evening")
     layer = find_layer(project, unit.render_layer_id)
     layer_name = layer.display_name if layer else "Layer"
     stem = safe_stem(f"{layer_name}_{unit.display_name}")
@@ -67,10 +67,10 @@ def _beauty_final_path(context, unit, state):
     return os.path.join(directory, f"{stem}{suffix}_Beauty.png")
 
 
-def stage_beauty_image(context, unit, state, image):
+def stage_beauty_image(context, unit, state, image, variant=""):
     """Write the Beauty PNG beside its final path; the final file is untouched."""
     staged = StagedExport(
-        _beauty_final_path(context, unit, state),
+        _beauty_final_path(context, unit, state, variant),
         "",
     )
     staged.staging_path = _staging_path(staged.final_path)
@@ -151,14 +151,10 @@ def _area_average(values, size, axis):
     return numpy.diff(at_edges, axis=axis) * (size / count)
 
 
-def scale_atlas(source_path, target_path, size):
-    """Write the atlas at source_path as a size x size 8-bit PNG at
-    target_path; the source file is not touched.
-
-    Pixels are averaged in linear light by covered area, as the headset's
-    own texture filtering does, so colour and brightness stay as baked;
-    averaging the sRGB-encoded values would darken fine contrast."""
-    source = bpy.data.images.load(source_path, check_existing=False)
+def load_linear_channels(path):
+    """The R, G and B planes of an image file in linear light (rows from the
+    bottom, as Blender stores them)."""
+    source = bpy.data.images.load(path, check_existing=False)
     try:
         width, height = source.size
         pixels = numpy.empty(width * height * 4, dtype=numpy.float32)
@@ -169,27 +165,70 @@ def scale_atlas(source_path, target_path, size):
     rgb = pixels.reshape(height, width, 4)[..., :3]
     if is_float:
         # A float file is already linear.
-        linear_channels = [rgb[..., channel] for channel in range(3)]
-    else:
-        # An 8-bit file gives its encoded values; a table converts all 256.
-        table = _srgb_to_linear(numpy.arange(256, dtype=numpy.float64) / 255.0)
-        codes = numpy.rint(rgb * 255.0).astype(numpy.uint8)
-        linear_channels = [table[codes[..., channel]] for channel in range(3)]
-    del pixels, rgb
-    result = numpy.ones((size, size, 4), dtype=numpy.float32)
-    for channel, linear in enumerate(linear_channels):
-        linear = _area_average(linear, size, 1)
-        linear = _area_average(linear, size, 0)
-        result[..., channel] = numpy.clip(_linear_to_srgb(linear), 0.0, 1.0)
-    small = bpy.data.images.new(f"__PMVR_SCALE_{uuid.uuid4().hex}", size, size, alpha=False)
+        return [rgb[..., channel].copy() for channel in range(3)]
+    # An 8-bit file gives its encoded values; a table converts all 256.
+    table = _srgb_to_linear(numpy.arange(256, dtype=numpy.float64) / 255.0)
+    codes = numpy.rint(rgb * 255.0).astype(numpy.uint8)
+    return [table[codes[..., channel]] for channel in range(3)]
+
+
+def write_encoded(path, encoded, file_format='PNG', quality=90):
+    """Write sRGB-encoded (h, w, 3) values 0-1 as an 8-bit file, byte for
+    byte: no view transform."""
+    height, width, _channels = encoded.shape
+    pixels = numpy.ones((height, width, 4), dtype=numpy.float32)
+    pixels[..., :3] = numpy.clip(encoded, 0.0, 1.0)
+    image = bpy.data.images.new(f"__PMVR_WRITE_{uuid.uuid4().hex}", width, height, alpha=False)
     try:
-        small.pixels.foreach_set(result.ravel())
-        # The byte buffer is written as it is: no view transform.
-        small.filepath_raw = target_path
-        small.file_format = 'PNG'
-        small.save()
+        image.pixels.foreach_set(pixels.ravel())
+        image.filepath_raw = path
+        image.file_format = file_format
+        if file_format == 'JPEG':
+            try:
+                image.save(quality=quality)
+            except TypeError:
+                image.save()
+        else:
+            image.save()
     finally:
-        bpy.data.images.remove(small)
+        bpy.data.images.remove(image)
+
+
+def scaled_linear(channels, width, height=None):
+    """Average planes down to width x height (square without a height) by
+    covered area; linear light keeps the colour."""
+    height = height or width
+    return [_area_average(_area_average(plane, width, 1), height, 0) for plane in channels]
+
+
+def scale_atlas(source_path, target_path, size):
+    """Write the atlas at source_path as a size x size 8-bit PNG at
+    target_path; the source file is not touched.
+
+    Pixels are averaged in linear light by covered area, as the headset's
+    own texture filtering does, so colour and brightness stay as baked;
+    averaging the sRGB-encoded values would darken fine contrast."""
+    linear = scaled_linear(load_linear_channels(source_path), size)
+    write_encoded(target_path, numpy.stack([_linear_to_srgb(plane) for plane in linear], axis=-1))
+
+
+def write_swatch(atlas_path, target_path, size=256, view=1024):
+    """A size x size JPEG cut from the atlas shown at view px: of a grid of
+    candidate squares, the one with the least empty (black) space, nearest
+    the centre on a tie."""
+    linear = scaled_linear(load_linear_channels(atlas_path), view)
+    encoded = numpy.stack([_linear_to_srgb(plane) for plane in linear], axis=-1)
+    empty = encoded.max(axis=2) < 2.0 / 255.0
+    best = None
+    step = size // 2
+    centre = (view - size) / 2
+    for y in range(0, view - size + 1, step):
+        for x in range(0, view - size + 1, step):
+            score = (float(empty[y:y + size, x:x + size].mean()), abs(x - centre) + abs(y - centre))
+            if best is None or score < best[0]:
+                best = (score, x, y)
+    _score, x, y = best
+    write_encoded(target_path, encoded[y:y + size, x:x + size], file_format='JPEG')
 
 
 def beauty_image_name(layer, unit, state):

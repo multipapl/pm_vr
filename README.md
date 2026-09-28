@@ -54,12 +54,46 @@ size; Blender shows it. Export writes each atlas into the USDZ/GLB at its unit's
 resolution, averaged in linear light by covered area, so colour and brightness
 stay as baked (the mean moves by less than a tenth of an 8-bit step). The baked
 file is not changed, so a unit's resolution can be lowered, or raised back up to
-the baked size, without a rebake. The margin is scaled so it keeps its width at
-the unit's resolution. The Bake stage **Test** switch (100/75/50/25%) bakes the
+the baked size, without a rebake. **Island Padding** (Project Settings, 0.002
+by default) is the gap the UV packer leaves between islands, in UV units (the
+UVPackmaster Margin). The bake margin follows it at any bake size: a unit of one
+object fills the whole gap, and in a shared unit each object fills half of it.
+Objects of a unit bake one after another into one image, and Blender paints an
+object's margin over every pixel that is not its own, a neighbouring island
+too; a margin wider than the gap would repaint the edges of islands baked
+earlier. The Bake stage **Test** switch (100/75/50/25%) bakes the
 queue at a share of the Bake Resolution for quick checks; it is back at 100%
 when a file opens. A unit whose baked file is smaller than its resolution (a test
 bake, or a resolution raised above the baked size) shows it in its status, and
 export warns about it.
+
+**Material variants** (Unlit units of one object): **Add Variant** in the unit
+details adds a name and a material that takes the place of the unit's
+**Changes** material. The queue bakes the unit, then each variant, per lighting
+state; a variant uses its material on the bake copies only, and keeps just a PNG
+(`<Layer>_<Unit>_<Variant>[_Evening]_Beauty.png`). The row shows `DE` when both
+states are baked and turns red when the unit was baked again since. USDZ export
+writes, per the Mac contract, `Variants/<Object>_<Variant>.usdz` (and
+`_Evening.usdz`) holding only the object under its scene name, in place, with the
+variant's colour at the unit's resolution; the optional **Marker** Empty goes in
+as `VariantMarker`. It also writes 256 px swatches (`<Object>_<Variant>_swatch.jpg`,
+`<Object>_swatch.jpg` for the default) and `Variants/materialVariants.json`, the
+`materialVariants` block for LevelManifest.json. The default variant is the object
+in the main scene and has no file.
+
+**Flatten to Texture** (Shader Editor, right-click or the Node menu) turns
+selected nodes, such as an image through Color Ramp, Hue/Saturation or Math,
+into one Image Texture: the selection is rendered texel by texel and saved as
+a PNG in `PMVR_Flattened` next to the .blend. The dialog asks for the long side,
+the largest image's by default; the other side keeps its aspect ratio, and a
+smaller size averages the texels down (an oversized 4K roughness can become 1K)
+(sRGB into colour inputs, Non-Color into values and normal maps). Coordinates
+left outside the selection (UV Map, Mapping) stay connected, so tiling and
+resolution are kept; a selected Mapping is baked in. USD then gets exactly what
+the material shows. Nodes that depend on the surface or the view (Geometry,
+Layer Weight, AO, procedural textures without UV input) are refused. Generated
+PBR materials are copied from the source at bake time, so flatten before the
+bake (or rebake the unit).
 
 Beauty bake uses Cycles Combined at 256 samples by default, shared image targets,
 SimpleBake-style image-only compositor denoise, and a single PNG atlas per unit/state.
