@@ -429,8 +429,6 @@ def draw_bake(layout, context):
     row = preview.row(align=True)
     row.prop(project, "show_sources", toggle=True)
     row.prop(project, "show_generated", toggle=True)
-    op = preview.operator("pmvr.select_pipeline_items", text="Select Baked Output", icon='RESTRICT_SELECT_OFF')
-    op.target = 'UNIT_GENERATED'
 
 
 def draw_probes(layout, project):

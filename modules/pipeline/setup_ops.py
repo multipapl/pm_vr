@@ -1087,7 +1087,6 @@ class PMVR_OT_SelectPipelineItems(bpy.types.Operator):
         ('LAYER_SOURCES', "Layer Sources", "Select the objects of the active layer"),
         ('LAYER_EXPORT_GUESTS', "Additional Export Objects", "Select the additional objects of this export"),
         ('UNIT_SOURCES', "Unit Sources", "Select the objects of the highlighted unit"),
-        ('UNIT_GENERATED', "Unit Generated", "Select the baked result of the highlighted unit"),
         ('UNASSIGNED', "Unassigned",
          "Select the objects visible now inside Source Root that belong to no layer (lights excluded)"),
     ))
@@ -1111,15 +1110,6 @@ class PMVR_OT_SelectPipelineItems(bpy.types.Operator):
         elif self.target == 'UNIT_SOURCES':
             unit = active_unit(project)
             objects = unit_members(unit.unit_id) if unit else []
-        elif self.target == 'UNIT_GENERATED':
-            unit = active_unit(project)
-            objects = [
-                obj for obj in bpy.data.objects
-                if unit
-                and obj.get(TAG_GENERATED)
-                and obj.get(TAG_UNIT_ID) == unit.unit_id
-                and obj.get(TAG_MODE) == project.bake_mode
-            ]
         else:
             objects = unassigned_visible_objects(context)
         selected = 0
