@@ -127,6 +127,13 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 
 - Setup, layer detail: **Queue N Units** (`pmvr.queue_layer_units`, baked layer types only) adds every unit of the active layer to the bake queue in list order; units already queued and units without objects are skipped and counted in the report. On UniPlace the 11 baked layers queue all 251 units. Test: `tests/blender_queue_layer_smoke.py`.
 
+## Bake queue continues after a stop (2026-09-29)
+
+- Queue entries carry `day_done` / `evening_done`. After each job the queue (`_close_job`) marks the entry once the unit and all its variants for that state are through without a failure (a unit skipped for the state counts as done); the entry leaves the queue when every checked state is done. A new run skips marked states and logs "Continuing the queue: N unit bake(s) already done in it are skipped"; a queue baked through is refused ("Clear Queue and add units"). Cancelled and failed units stay unmarked. The list shows D/E marks and "Already baked in this queue"; Setup unit detail shows "Last baked" per state from `build_records`.
+- Stop, Save, reopen (or crash and open the last save), Bake: continues with the rest. Saving mid-bake is supported (recovery markers).
+- The UniPlace full rebake started 2026-09-29 16:20:06 with the old code (251 units, Day + Evening, 4K). `C:\Users\papl\Desktop\PMVR_continue_queue.py` converts that queue after a stop: marks entries from SUCCESS build records since 16:20:06 (variants by title), removes units done for the checked states. Tested on synthetic records.
+- Regression: `tests/blender_gui_bake_resume.py` (A, B, C Day + Evening; Cancel during B Evening, save, reopen, Bake: only B and C Evening bake, one success per unit and state, queue empty, refusal).
+
 ## Ideas from the user (2026-09-29, not started)
 
 - UV adequacy check for all bake units, by rasterising each unit's SimpleBake triangles at the bake size: overlaps between islands and folded faces inside one, gaps below the island padding (dilate each island by padding x size), outside 0-1, zero-area and flipped faces, stretch (UV vs 3D area), texel density spread, atlas fill. A "check all units" list plus a Scene Debug highlight next to UV Health.
