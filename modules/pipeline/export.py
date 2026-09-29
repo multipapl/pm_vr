@@ -9,7 +9,7 @@ import uuid
 import bpy
 
 from .. import collection_export
-from .bake_files import png_size, scale_atlas, write_swatch
+from .bake_files import png_size, scale_atlas
 from .bake_scene import PipelineBakeError, same_structure
 from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .generated import (
@@ -264,7 +264,8 @@ def _variant_marker(unit):
 def _export_variants(context, project, layer, state, textures):
     """Variants/<Object>_<Variant>[_Evening].usdz for the layer's units with
     variants: the generated object itself (so its name is the scene's) with
-    the variant's baked colour, plus swatches. Returns (written, problems)."""
+    the variant's baked colour. Swatches are made by hand and placed in
+    Variants/; export never writes them. Returns (written, problems)."""
     units = [unit for unit in project.bake_units if unit.render_layer_id == layer.layer_id and len(unit.variants)]
     if not units:
         return 0, []
@@ -278,15 +279,7 @@ def _export_variants(context, project, layer, state, textures):
             problems.append(f'"{unit.display_name}": {problem or "generated object is missing"}')
             continue
         entity = variants.usd_name(generated.name)
-        day_image = bpy.data.images.get(unit.day_beauty_image)
-        if day_image and os.path.exists(bpy.path.abspath(day_image.filepath)):
-            write_swatch(bpy.path.abspath(day_image.filepath), os.path.join(staging, variants.swatch_path(entity)))
         for variant in unit.variants:
-            if variants.variant_status(unit, variant, 'DAY') == "Ready":
-                write_swatch(
-                    bpy.path.abspath(variant.day_file),
-                    os.path.join(staging, variants.swatch_path(entity, variant)),
-                )
             status = variants.variant_status(unit, variant, state)
             if status != "Ready":
                 problems.append(

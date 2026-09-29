@@ -76,9 +76,11 @@ states are baked and turns red when the unit was baked again since. USDZ export
 writes, per the Mac contract, `Variants/<Object>_<Variant>.usdz` (and
 `_Evening.usdz`) holding only the object under its scene name, in place, with the
 variant's colour at the unit's resolution; the optional **Marker** Empty goes in
-as `VariantMarker`. It also writes 256 px swatches (`<Object>_<Variant>_swatch.jpg`,
-`<Object>_swatch.jpg` for the default) and `Variants/materialVariants.json`, the
-`materialVariants` block for LevelManifest.json. The default variant is the object
+as `VariantMarker`. It also writes `Variants/materialVariants.json`, the
+`materialVariants` block for LevelManifest.json. Swatches are made by hand:
+put `<Object>_<Variant>_swatch.jpg` (and `<Object>_swatch.jpg` for the default,
+which then joins the manifest) into `Variants/`; export never writes or
+replaces them. The default variant is the object
 in the main scene and has no file.
 
 **Flatten to Texture** (Shader Editor, right-click or the Node menu) turns

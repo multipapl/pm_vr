@@ -212,25 +212,6 @@ def scale_atlas(source_path, target_path, size):
     write_encoded(target_path, numpy.stack([_linear_to_srgb(plane) for plane in linear], axis=-1))
 
 
-def write_swatch(atlas_path, target_path, size=256, view=1024):
-    """A size x size JPEG cut from the atlas shown at view px: of a grid of
-    candidate squares, the one with the least empty (black) space, nearest
-    the centre on a tie."""
-    linear = scaled_linear(load_linear_channels(atlas_path), view)
-    encoded = numpy.stack([_linear_to_srgb(plane) for plane in linear], axis=-1)
-    empty = encoded.max(axis=2) < 2.0 / 255.0
-    best = None
-    step = size // 2
-    centre = (view - size) / 2
-    for y in range(0, view - size + 1, step):
-        for x in range(0, view - size + 1, step):
-            score = (float(empty[y:y + size, x:x + size].mean()), abs(x - centre) + abs(y - centre))
-            if best is None or score < best[0]:
-                best = (score, x, y)
-    _score, x, y = best
-    write_encoded(target_path, encoded[y:y + size, x:x + size], file_format='JPEG')
-
-
 def beauty_image_name(layer, unit, state):
     return (
         f"PMVR_{safe_stem(layer.display_name)}_"

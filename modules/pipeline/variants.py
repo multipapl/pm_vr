@@ -6,7 +6,9 @@ at Variants/<Object>_<Variant>.usdz, with ..._Evening.usdz for the Evening
 look. The default variant is the object in the main scene and has no file.
 Only Unlit objects of the main scene; the app swaps the base colour texture
 only, so every variant is baked with light, per look, on the unit's UV.
-Optional: Variants/<Object>_<Variant>_swatch.jpg (256 px), and an Empty
+Optional: Variants/<Object>_<Variant>_swatch.jpg, made by hand (export
+never writes or replaces swatches; the default one, <Object>_swatch.jpg,
+goes into the manifest when present), and an Empty
 named VariantMarker in the file for the button.
 """
 
