@@ -104,8 +104,8 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 
 - Full USDZ export (28 files + Variants/) in `UniPlace_Sync/USD`, checked file by file: no empty materials, no missing textures, variant KitchenMarble Marble/Stone to the Mac contract, 11 probes in Runtime. Mac notes on the user's Desktop (`PMVR_Export_для_AssetManager.md`, with a "what changed" section).
 - Added this session: island padding margin, Flatten to Texture (long side), material variants, Bevel-stable signatures, Blackbody/Light Path camera values into USD (colour and strength), render layer reordering, fix for the crash when a queue ends at its start (a dangling modal handler; also hit through Geo-Scatter's depsgraph handler).
-- Open on the user's side: lamp materials (roughness/clearcoat differ between day/evening; rebake the lamp units after fixing), final bake (likely with the texture cache), headset review: double glow on the evening lamps (atlas + emissive), Alpha threshold, two UV channels in one material on the Mac. Additional (cross-layer) exports are not set up yet, not needed for the headset.
-- Offered, not done: Export for Day/Evening toggles so one click writes both states (the user exported Evening twice by mistake).
+- Open on the user's side: the lamp materials are fixed (rebake the lamp units before the next export); first the headset test of everything converting and working, only then the final bake (likely with the texture cache); headset review: double glow on the evening lamps (atlas + emissive), Alpha threshold, two UV channels in one material on the Mac. Additional (cross-layer) exports are not set up yet, not needed for the headset.
+- Declined by the user: Export for Day/Evening toggles (full re-exports of every layer and state are rare).
 
 ## Ideas from the user (2026-09-29, not started)
 
