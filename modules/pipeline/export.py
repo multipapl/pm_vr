@@ -349,14 +349,16 @@ def _write_usdz(context, project, layer, objects, final_path, textures):
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def write_variant_manifest(project, layers):
-    """Variants/materialVariants.json for the variant units of the layers
-    (their Day files are the models). None when nothing to write."""
+def write_variant_manifest(project):
+    """Variants/materialVariants.json for every unit with variants whose Day
+    file is in the staging folder (the Day files are the models), whichever
+    layers this export wrote: a partial export (only the lamp layers, say)
+    used to rewrite it empty. None when nothing to write."""
     staging = bpy.path.abspath(project.usdz_output_directory)
     index = _generated_beauty_index()
     entries = []
     for unit in project.bake_units:
-        if unit.render_layer_id not in layers or not len(unit.variants):
+        if not len(unit.variants):
             continue
         if variants.variant_problem(project, unit):
             continue
@@ -526,7 +528,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         if scaled:
             log.info("Export", f"Atlases scaled to unit resolution: {scaled}")
         if 'USDZ' in formats:
-            manifest = write_variant_manifest(project, exported_layers)
+            manifest = write_variant_manifest(project)
             if manifest:
                 log.info("Export", f"Material variants: {manifest[1]} object(s) -> {manifest[0]}")
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
