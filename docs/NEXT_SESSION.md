@@ -143,6 +143,16 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 - Atlases baked before (the 51 Day units of the 2026-09-29 rebake) are not filled; `uv_fill.fill_png(path, generated meshes, bake_margin(...))` can fill them in place (idempotent).
 - Regression: `tests/blender_uv_fill_smoke.py` (rasterizer vs brute force incl. large/outside triangles, pull-push kept pixels and odd sizes, real shared-unit bake with fill on/off).
 
+## Guided Beauty denoise (2026-09-29)
+
+- Smeared patches on fabric (the user saw them since SimpleBake) come from the denoiser, not the resolution: SimpleBake and PM VR denoised the saved, color-managed PNG in a compositor scene of their own (Image -> Denoise; Albedo and Normal unlinked; SimpleBake appends `compositor_denoise` from resources/denoise.blend). The scene's compositor and its Denoising Data passes never reach a bake. Without guides OIDN takes fabric weave in a noisy shadow for noise.
+- `project.beauty_denoise` (Project Settings > Bake Defaults): Guided (default), Image Only (the SimpleBake way), Off. Guided: `BeautyBakeRuntime._denoise_guided` bakes albedo (Diffuse Color) and object-space normal guides with `bake_receivers` at `GUIDE_SAMPLES` (16) and denoises the float bake with `denoise_image` before the view transform; units and variants. A failure falls back to Image Only with a warning; Esc in a guide bake cancels the queue.
+- The Beauty float image is tagged sRGB and holds sRGB-encoded values (Cycles writes them so); `copy_pixels` now encodes the linear denoise result for such a target. Without that the guided result came back ~5x darker.
+- `copy_pixels` copied slices through Python lists: 27 of 31 s at 4K. One foreach_get/foreach_set: 0.1 s (also speeds up Lightmap denoise). Guided denoise of a 4K unit: guides ~23 s, denoise ~5 s.
+- UniPlace SofaKiitchenSeat Day 4K (scratch copy, paths remapped): the production atlas of 2026-09-29 17:16 (Image Only) keeps less than half of the guided detail on 22 % of the fabric, 10 % in the worst shadows; mean colour within ~1 %.
+- Probes now render with Cycles' own denoiser (OIDN, albedo + normal passes); the scene had it off and the compositor is off for probes.
+- Regression: `tests/blender_denoise_smoke.py` (sky-lit checker at 2 samples: Guided error vs a 256-sample bake about half of Image Only, mean colour kept, guides removed, samples restored, fallback logged).
+
 ## Ideas from the user (2026-09-29, not started)
 
 - UV adequacy check for all bake units, by rasterising each unit's SimpleBake triangles at the bake size: overlaps between islands and folded faces inside one, gaps below the island padding (dilate each island by padding x size), outside 0-1, zero-area and flipped faces, stretch (UV vs 3D area), texel density spread, atlas fill. A "check all units" list plus a Scene Debug highlight next to UV Health.

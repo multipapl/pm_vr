@@ -73,6 +73,7 @@ class ProbeSession:
         "use_sequencer", "film_transparent", "use_multiview", "use_persistent_data",
     )
     IMAGE = ("media_type", "file_format", "color_mode", "color_depth", "exr_codec")
+    CYCLES = ("samples", "use_denoising", "denoiser", "denoising_input_passes")
 
     def __init__(self, context):
         scene = context.scene
@@ -85,6 +86,7 @@ class ProbeSession:
         self.render = {name: getattr(scene.render, name) for name in self.RENDER if hasattr(scene.render, name)}
         settings = scene.render.image_settings
         self.image = {name: getattr(settings, name) for name in self.IMAGE if hasattr(settings, name)}
+        self.cycles = {name: getattr(scene.cycles, name) for name in self.CYCLES if hasattr(scene.cycles, name)}
         self.display = None
         self.evaluation = EvaluationSnapshot(context)
         self.work = None
@@ -113,6 +115,15 @@ class ProbeSession:
         # DWAA/DWAB are lossy, and Apple's EXR reader refuses them.
         settings.exr_codec = 'ZIP'
         self.scene.cycles.samples = self.project.cycles_samples
+        # Cycles' own denoiser with its albedo and normal passes; the scene's
+        # compositor, where a render may be denoised, is off for probes.
+        cycles = self.scene.cycles
+        cycles.use_denoising = True
+        for name, value in (("denoiser", 'OPENIMAGEDENOISE'), ("denoising_input_passes", 'RGB_ALBEDO_NORMAL')):
+            try:
+                setattr(cycles, name, value)
+            except (AttributeError, TypeError, ValueError):
+                pass
         if not bpy.app.background:
             view = self.context.preferences.view
             self.display = view.render_display_type
@@ -177,6 +188,11 @@ class ProbeSession:
         for name, value in self.image.items():
             try:
                 setattr(settings, name, value)
+            except (TypeError, ValueError):
+                pass
+        for name, value in self.cycles.items():
+            try:
+                setattr(self.scene.cycles, name, value)
             except (TypeError, ValueError):
                 pass
         if self.display is not None:

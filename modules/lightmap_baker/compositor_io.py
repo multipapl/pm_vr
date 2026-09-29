@@ -5,11 +5,16 @@ import os
 import tempfile
 
 import bpy
+import numpy
 
 from .images import save_linear_exr, set_scene_linear_colorspace
 
 
-def copy_pixels(source, target, chunk_size=262_144):
+def _linear_to_srgb(values):
+    return numpy.where(values <= 0.0031308, values * 12.92, 1.055 * numpy.power(numpy.maximum(values, 0.0), 1.0 / 2.4) - 0.055)
+
+
+def copy_pixels(source, target):
     if tuple(source.size) == (0, 0) or not source.has_data:
         source.reload()
         try:
@@ -26,10 +31,15 @@ def copy_pixels(source, target, chunk_size=262_144):
     total = len(target.pixels)
     if len(source.pixels) != total:
         raise RuntimeError("denoise result channel count does not match target")
-
-    for start in range(0, total, chunk_size):
-        end = min(start + chunk_size, total)
-        target.pixels[start:end] = source.pixels[start:end]
+    # One buffer copy; slicing pixels built Python lists and took ~27 s at 4K.
+    buffer = numpy.empty(total, dtype=numpy.float32)
+    source.pixels.foreach_get(buffer)
+    if target.colorspace_settings.name == 'sRGB':
+        # The result is linear. A float image tagged sRGB (the Beauty bake)
+        # holds sRGB-encoded values, as Cycles writes them there.
+        rgba = buffer.reshape(-1, 4)
+        rgba[:, :3] = _linear_to_srgb(rgba[:, :3])
+    target.pixels.foreach_set(buffer)
     target.update()
 
 

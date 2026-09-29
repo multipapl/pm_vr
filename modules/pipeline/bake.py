@@ -66,6 +66,11 @@ def _record(project, unit, state, signature, image, status, message="", mode='BE
     record.message = message
 
 
+# Samples for the albedo and normal denoise guides: enough to filter the
+# textures like the Combined bake does, far below its noise.
+GUIDE_SAMPLES = 16
+
+
 def done_flag(state):
     return "day_done" if state == 'DAY' else "evening_done"
 
@@ -257,6 +262,65 @@ class BeautyBakeRuntime:
             "normal_b": bake.normal_b,
         })
 
+    def _denoise_guided(self, label):
+        """Denoise (Project Settings) Guided: bake albedo (Diffuse Color)
+        and object-space normal guides for the receivers and denoise the
+        float bake with them, before the view transform. Without guides the
+        denoiser cannot tell fabric weave in a shadow from noise and smears
+        it. True when the bake was denoised; on failure the staged PNG gets
+        the image-only denoise instead."""
+        if self.project.beauty_denoise != 'GUIDED':
+            return False
+        started = time.monotonic()
+        token = uuid.uuid4().hex
+        albedo = create_float_image(f"__PMVR_ALBEDO_{token}", self.bake_size, (1.0, 1.0, 1.0, 1.0))
+        normal = create_float_image(f"__PMVR_NORMAL_{token}", self.bake_size, (0.5, 0.5, 1.0, 1.0))
+        scene = self.context.scene
+        try:
+            scene.cycles.samples = GUIDE_SAMPLES
+            try:
+                bake_receivers(self.context, self.receivers, albedo, 'DIFFUSE', self.margin, {'COLOR'})
+                bake_receivers(self.context, self.receivers, normal, 'NORMAL', self.margin)
+            finally:
+                scene.cycles.samples = self.project.cycles_samples
+                for receiver in self.receivers:
+                    set_target_image(receiver, self.image)
+            guides = time.monotonic()
+            denoise_image(scene, self.image, albedo, normal)
+        except PipelineBakeCancelled:
+            # Esc during a guide bake stops the queue like Esc in the Combined bake.
+            _QUEUE["cancel_requested"] = True
+            raise
+        except Exception as exc:
+            self.warnings.append(f"guided denoise failed, image-only denoise used: {exc}")
+            log.write("Beauty", f"{label}: guided denoise failed, image-only denoise used: {exc}", level="WARNING", with_traceback=True)
+            return False
+        finally:
+            for image in (albedo, normal):
+                try:
+                    bpy.data.images.remove(image)
+                except ReferenceError:
+                    pass
+        log.info(
+            "Beauty",
+            f"{label}: guided denoise (guides {log.duration(guides - started)}, "
+            f"denoise {log.duration(time.monotonic() - guides)})",
+        )
+        return True
+
+    def _denoise_staged(self, path, label, guided):
+        """Image-only denoise of the staged PNG, as SimpleBake: Denoise Image
+        Only, or Guided when its guides failed."""
+        if guided or self.project.beauty_denoise == 'OFF':
+            return
+        try:
+            denoise_external_beauty(self.context.scene, self.image, path)
+        except Exception as exc:
+            self.warnings.append(f"denoise failed, raw Beauty used: {exc}")
+            if self.operator:
+                self.operator.report({'WARNING'}, f"Denoise failed; using raw Beauty: {exc}")
+            log.warning("Beauty", f"{label}: denoise failed; using raw Beauty: {exc}")
+
     def _fill_empty(self, path, label):
         """Fill Empty UV Space (Project Settings) on the denoised PNG. A
         failure keeps the black background and does not fail the bake."""
@@ -279,23 +343,16 @@ class BeautyBakeRuntime:
     def _finish_variant(self):
         """Keep the variant's PNG; the unit's generated result is untouched."""
         step_count = len(self.receivers) + 2
-        _show_bake_stage(self.operator, "Save external Beauty", len(self.receivers) + 1, step_count)
+        label = f'"{self.unit.display_name}" variant "{self.variant.title}"'
+        _show_bake_stage(self.operator, "Denoise", len(self.receivers) + 1, step_count)
+        guided = self._denoise_guided(label)
+        _show_bake_stage(self.operator, "Save external Beauty", len(self.receivers) + 2, step_count)
         staged_file = stage_beauty_image(
             self.context, self.unit, self.state, self.image, variants.variant_stem(self.variant)
         )
         try:
-            _show_bake_stage(self.operator, "Compositor denoise", len(self.receivers) + 2, step_count)
-            try:
-                denoise_external_beauty(self.context.scene, self.image, staged_file.staging_path)
-            except Exception as exc:
-                self.warnings.append(f"denoise failed, raw Beauty used: {exc}")
-                log.warning(
-                    "Beauty",
-                    f'{self.unit.display_name} variant "{self.variant.title}": denoise failed; using raw Beauty: {exc}',
-                )
-            self._fill_empty(
-                staged_file.staging_path, f'"{self.unit.display_name}" variant "{self.variant.title}"'
-            )
+            self._denoise_staged(staged_file.staging_path, label, guided)
+            self._fill_empty(staged_file.staging_path, label)
             commit_staged_file(staged_file, self.image, 'PNG')
         finally:
             staged_file.cleanup()
@@ -319,44 +376,25 @@ class BeautyBakeRuntime:
         if self.variant:
             return self._finish_variant()
         step_count = len(self.receivers) + 3
+        label = f'"{self.unit.display_name}"'
+        _show_bake_stage(self.operator, "Denoise", len(self.receivers) + 1, step_count)
+        guided = self._denoise_guided(label)
         _show_bake_stage(
             self.operator,
             "Save external Beauty",
-            len(self.receivers) + 1,
+            len(self.receivers) + 2,
             step_count,
         )
-        # Match SimpleBake: establish an external file before compositor work.
-        # It is staged beside the final path; the previous successful file is
-        # replaced only after every Blender-side step has been prepared.
+        # The external file is staged beside the final path; the previous
+        # successful file is replaced only after every Blender-side step has
+        # been prepared.
         staged_file = stage_beauty_image(
             self.context, self.unit, self.state, self.image
         )
         published = False
         try:
-            _show_bake_stage(
-                self.operator,
-                "Compositor denoise",
-                len(self.receivers) + 2,
-                step_count,
-            )
-            try:
-                denoise_external_beauty(
-                    self.context.scene,
-                    self.image,
-                    staged_file.staging_path,
-                )
-            except Exception as exc:
-                self.warnings.append(f"denoise failed, raw Beauty used: {exc}")
-                if self.operator:
-                    self.operator.report(
-                        {'WARNING'},
-                        f"Denoise failed; using raw Beauty: {exc}",
-                    )
-                log.warning(
-                    "Beauty",
-                    f'{self.unit.display_name}: denoise failed; using raw Beauty: {exc}',
-                )
-            self._fill_empty(staged_file.staging_path, f'"{self.unit.display_name}"')
+            self._denoise_staged(staged_file.staging_path, label, guided)
+            self._fill_empty(staged_file.staging_path, label)
             _show_bake_stage(
                 self.operator,
                 "Build preview result",
@@ -866,7 +904,8 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             f"Texture cache {'on' if getattr(render, 'use_texture_cache', False) else 'off'}"
             + (", auto generate" if getattr(render, 'use_auto_generate_texture_cache', False) else "")
             + f"; autopack {'on' if bpy.data.use_autopack else 'off'}"
-            + f"; empty UV space {'filled' if project.fill_empty_uv else 'black'}",
+            + f"; empty UV space {'filled' if project.fill_empty_uv else 'black'}"
+            + f"; denoise {project.beauty_denoise.lower()}",
         )
         if project.bake_mode == 'LIGHTMAP':
             return self._execute_lightmap(context, states)

@@ -521,6 +521,19 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         ),
         default=True,
     )
+    beauty_denoise: bpy.props.EnumProperty(
+        name="Denoise",
+        description="How a Beauty bake is denoised",
+        items=(
+            ('GUIDED', "Guided",
+             "Bake albedo and normal guides and denoise the bake before the view transform: "
+             "the denoiser keeps texture detail (fabric weave) it would otherwise take for noise"),
+            ('IMAGE', "Image Only",
+             "Denoise the saved PNG without guides, as SimpleBake: smears noisy areas into flat patches"),
+            ('OFF', "Off", "Keep the raw bake"),
+        ),
+        default='GUIDED',
+    )
     default_unit_resolution: bpy.props.EnumProperty(
         name="Default Unit Resolution",
         items=RESOLUTION_ITEMS,
