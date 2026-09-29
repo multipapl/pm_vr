@@ -38,6 +38,23 @@ def beauty_status(unit, state):
     return status
 
 
+def last_baked(project, unit):
+    """(D/E, "29.09 19:18") of the unit's latest successful Beauty bake per state."""
+    latest = {}
+    for record in project.build_records:
+        if (
+            record.unit_id == unit.unit_id and record.bake_mode == 'BEAUTY'
+            and record.status == "SUCCESS" and not record.message.startswith("variant ")
+        ):
+            latest[record.lighting_state] = max(latest.get(record.lighting_state, ""), record.timestamp)
+    result = []
+    for state, label in (('DAY', "D"), ('EVENING', "E")):
+        stamp = latest.get(state, "")
+        if len(stamp) >= 16:
+            result.append((label, f"{stamp[8:10]}.{stamp[5:7]} {stamp[11:16]}"))
+    return result
+
+
 def draw_state_switch(layout, project):
     row = layout.row(align=True)
     row.label(text="Lighting:")
@@ -96,6 +113,12 @@ class PMVR_UL_BakeQueue(bpy.types.UIList):
         split = layout.split(factor=0.35, align=True)
         split.label(text=unit.display_name + (f" +{len(unit.variants)} var." if len(unit.variants) else ""))
         right = split.row(align=True)
+        done = ("D" if item.day_done else "") + ("E" if item.evening_done else "")
+        if done:
+            # Baked in this queue; the entry leaves once every state is done.
+            mark = right.row(align=True)
+            mark.ui_units_x = 2.0
+            mark.label(text=done, icon='CHECKMARK')
         right.prop(unit, "bake_scenario", text="")
         resolution = right.row(align=True)
         resolution.ui_units_x = 1.6
@@ -290,6 +313,9 @@ def draw_bake_units(layout, project):
         status_row = detail.row(align=True)
         status_row.label(text=f"Beauty D: {beauty_status(unit, 'DAY')}")
         status_row.label(text=f"E: {beauty_status(unit, 'EVENING')}")
+        baked = last_baked(project, unit)
+        if baked:
+            detail.label(text="Last baked: " + ", ".join(f"{state} {time}" for state, time in baked))
         if SHOW_LIGHTMAP:
             lightmap_row = detail.row(align=True)
             lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
@@ -388,6 +414,13 @@ def draw_bake(layout, context):
     op.direction = 'UP'
     op = controls.operator("pmvr.move_queue_entry", text="", icon='TRIA_DOWN')
     op.direction = 'DOWN'
+    day_done = sum(entry.day_done for entry in project.bake_queue)
+    evening_done = sum(entry.evening_done for entry in project.bake_queue)
+    if day_done or evening_done:
+        queue.label(
+            text=f"Already baked in this queue: Day {day_done}, Evening {evening_done}; Bake continues",
+            icon='CHECKMARK',
+        )
     buttons = queue.row(align=True)
     buttons.operator("pmvr.queue_selected_units", icon='RESTRICT_SELECT_OFF')
     buttons.operator("pmvr.clear_bake_queue", icon='TRASH')
@@ -537,6 +570,8 @@ HELP_SECTIONS = (
         "Modifiers must not add or remove material slots",
         "Setup layer Queue N Units: the whole layer into the queue",
         "Esc or Cancel: stops the queue, current unit discarded",
+        "A unit leaves the queue once baked for the checked states",
+        "Stopped queue: Save; after reopening Bake continues the rest",
         "Bake Resolution (Project Settings): size of the baked files",
         "Unit resolution can change after a bake: no rebake needed",
         "Layers and units are locked while baking",

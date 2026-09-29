@@ -66,6 +66,25 @@ def _record(project, unit, state, signature, image, status, message="", mode='BE
     record.message = message
 
 
+def done_flag(state):
+    return "day_done" if state == 'DAY' else "evening_done"
+
+
+def mark_queue_done(project, unit_id, state, states):
+    """A queued unit is baked for state (with its variants); it leaves the
+    queue once every state of the run is done."""
+    for index, entry in enumerate(project.bake_queue):
+        if entry.unit_id != unit_id:
+            continue
+        setattr(entry, done_flag(state), True)
+        if all(getattr(entry, done_flag(item)) for item in states):
+            project.bake_queue.remove(index)
+            project.active_bake_queue_index = min(
+                project.active_bake_queue_index, max(0, len(project.bake_queue) - 1)
+            )
+        return
+
+
 def _show_bake_stage(operator, message, step, step_count):
     feedback = getattr(operator, "_pmvr_feedback", None) if operator else None
     if feedback:
@@ -780,6 +799,14 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         if not states:
             self.report({'ERROR'}, "Choose Day, Evening, or both")
             return {'CANCELLED'}
+        already = sum(getattr(entry, done_flag(state)) for state in states for entry in project.bake_queue)
+        if project.bake_mode == 'BEAUTY' and already == len(states) * len(project.bake_queue):
+            project.last_operation_summary = (
+                f"Every queued unit is already baked for {' + '.join(s.title() for s in states)} "
+                "in this queue; Clear Queue and add units to bake them again"
+            )
+            self.report({'ERROR'}, project.last_operation_summary)
+            return {'CANCELLED'}
         # Scenario mistakes are reported before anything starts, not at 3 am.
         problems = scenario_preflight(
             context,
@@ -820,17 +847,28 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         if project.bake_mode == 'LIGHTMAP':
             return self._execute_lightmap(context, states)
 
-        entries = [entry.unit_id for entry in project.bake_queue]
+        entries = [
+            (entry.unit_id, {state for state in states if getattr(entry, done_flag(state))})
+            for entry in project.bake_queue
+        ]
+        if already:
+            log.info(
+                "Bake",
+                f"Continuing the queue: {already} unit bake(s) already done in it are skipped",
+            )
         self._project = project
         self._states = states
         self._original_state = project.active_lighting_state
         self._jobs = []
         for state in states:
-            for unit_id in entries:
+            for unit_id, done in entries:
+                if state in done:
+                    continue
                 self._jobs.append((state, unit_id, ""))
                 unit = find_unit(project, unit_id)
                 for variant in (unit.variants if unit else ()):
                     self._jobs.append((state, unit_id, variant.variant_id))
+        self._failed_jobs = set()
         self._job_cursor = 0
         self._current_runtime = None
         self._receiver_index = 0
@@ -885,6 +923,18 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             return result
         self._ended_result = result
         return {'RUNNING_MODAL'}
+
+    def _close_job(self, ok):
+        """After each job: once a unit and its variants are through for a
+        state without a failure, its queue entry records it."""
+        state, unit_id, _variant_id = self._jobs[self._job_cursor - 1]
+        if not ok:
+            self._failed_jobs.add((state, unit_id))
+        following = self._jobs[self._job_cursor] if self._job_cursor < len(self._jobs) else None
+        if following and following[:2] == (state, unit_id):
+            return
+        if (state, unit_id) not in self._failed_jobs:
+            mark_queue_done(self._project, unit_id, state, self._states)
 
     def _request_cancel(self, reason):
         if not self._cancel_requested:
@@ -966,11 +1016,14 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 self._current_runtime.fail(exc)
                 self._feedback.complete_object()
                 self._current_runtime = None
+                self._close_job(ok=False)
                 result = self._start_next_job(context)
                 return result or {'RUNNING_MODAL'}
+        ok = False
         try:
             self._current_runtime.finish()
             self._succeeded += 1
+            ok = True
             if self._current_runtime.warnings:
                 self._warned += 1
         except Exception as exc:
@@ -979,6 +1032,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         finally:
             self._feedback.complete_object()
             self._current_runtime = None
+        self._close_job(ok)
         result = self._start_next_job(context)
         return result or {'RUNNING_MODAL'}
 
@@ -1004,6 +1058,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             if not unit or (variant_id and not variant):
                 self._skipped += 1
                 self._feedback.complete_object()
+                self._close_job(ok=bool(unit))
                 continue
             try:
                 activate_state(context, state)
@@ -1026,6 +1081,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                     self._current_runtime = None
                     self._skipped += 1
                     self._feedback.complete_object()
+                    self._close_job(ok=True)
                     continue
                 self._receiver_index = 0
                 return self._start_receiver(context)
@@ -1041,6 +1097,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                         with_traceback=not isinstance(exc, PipelineBakeError),
                     )
                 self._feedback.complete_object()
+                self._close_job(ok=False)
         return self._finish_modal(context, cancelled=False)
 
     def _start_receiver(self, _context):

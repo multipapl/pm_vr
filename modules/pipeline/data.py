@@ -399,6 +399,10 @@ class PMVR_BakeScenario(bpy.types.PropertyGroup):
 
 class PMVR_BakeQueueEntry(bpy.types.PropertyGroup):
     unit_id: bpy.props.StringProperty(name="Unit ID")
+    # Baked in this queue: a stopped queue continues with what is left, and
+    # the entry leaves the queue once every state of the run is done.
+    day_done: bpy.props.BoolProperty(name="Day Baked", default=False, options={'HIDDEN'})
+    evening_done: bpy.props.BoolProperty(name="Evening Baked", default=False, options={'HIDDEN'})
 
 
 class PMVR_BuildRecord(bpy.types.PropertyGroup):
