@@ -18,7 +18,7 @@ from .generated import (
     snapshot_generated_bindings,
 )
 from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem, unit_members
-from . import log, variants
+from . import export_colours, log, variants
 from .setup_ops import baked_resolution
 from .state import activate_state
 
@@ -335,7 +335,9 @@ def _write_usdz(context, project, layer, objects, final_path, textures):
     try:
         for obj in render_disabled:
             obj.hide_render = False
-        with textures.scaled(project, objects):
+        with textures.scaled(project, objects), export_colours.explicit_colours(
+            context, objects, os.path.basename(final_path)
+        ):
             result = collection_export.export_usdz(assembly, temporary_path)
         if 'FINISHED' not in result or not os.path.exists(temporary_path):
             raise PipelineExportError(f"Blender did not produce {os.path.basename(final_path)}")
@@ -391,7 +393,9 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         try:
             for obj in render_disabled:
                 obj.hide_render = False
-            with textures.scaled(project, objects):
+            with textures.scaled(project, objects), export_colours.explicit_colours(
+                context, objects, f"{layer.display_name} ({format_name})"
+            ):
                 result = exporter(assembly, temporary_path)
         finally:
             for obj in render_disabled:
