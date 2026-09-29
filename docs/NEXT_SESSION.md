@@ -100,6 +100,13 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 - Regression: `tests/blender_resolution_smoke.py` (1024 bake of a 256 unit; USDZ and GLB atlases at 256/512/1024 with the same mean light; baked file hash and image path unchanged; 2048 above the baked size warns; 25% test bake; scaler checks: flat colour at 3:2, black/white checker, noisy mean). Baking tests set `bake_resolution = '256'` so units bake at their own size.
 - Existing UniPlace atlases were saved at unit size (old behaviour); they export as they are. Units rebaked from now on keep 4K.
 
+## Where UniPlace stands (2026-09-29, end of session)
+
+- Full USDZ export (28 files + Variants/) in `UniPlace_Sync/USD`, checked file by file: no empty materials, no missing textures, variant KitchenMarble Marble/Stone to the Mac contract, 11 probes in Runtime. Mac notes on the user's Desktop (`PMVR_Export_для_AssetManager.md`, with a "what changed" section).
+- Added this session: island padding margin, Flatten to Texture (long side), material variants, Bevel-stable signatures, Blackbody/Light Path camera values into USD (colour and strength), render layer reordering, fix for the crash when a queue ends at its start (a dangling modal handler; also hit through Geo-Scatter's depsgraph handler).
+- Open on the user's side: lamp materials (roughness/clearcoat differ between day/evening; rebake the lamp units after fixing), final bake (likely with the texture cache), headset review: double glow on the evening lamps (atlas + emissive), Alpha threshold, two UV channels in one material on the Mac. Additional (cross-layer) exports are not set up yet, not needed for the headset.
+- Offered, not done: Export for Day/Evening toggles so one click writes both states (the user exported Evening twice by mistake).
+
 ## Ideas from the user (2026-09-29, not started)
 
 - UV adequacy check for all bake units, by rasterising each unit's SimpleBake triangles at the bake size: overlaps between islands and folded faces inside one, gaps below the island padding (dilate each island by padding x size), outside 0-1, zero-area and flipped faces, stretch (UV vs 3D area), texel density spread, atlas fill. A "check all units" list plus a Scene Debug highlight next to UV Health.
