@@ -1212,6 +1212,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         bake.prop(project, "default_unit_resolution")
         bake.prop(context.scene, "pm_vr_target_td", text="Target TD px/cm")
         bake.prop(project, "uv_padding")
+        bake.prop(project, "fill_empty_uv")
         bake.prop(project, "cycles_samples")
         bake.prop(project, "beauty_output_directory")
         bake.prop(project, "lightmap_output_directory")

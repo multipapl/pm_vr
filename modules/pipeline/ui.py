@@ -563,6 +563,7 @@ HELP_SECTIONS = (
         "PBR: one Principled BSDF per material slot",
         "PBR colour corrections: Shader Editor, Flatten to Texture",
         "Island Padding (Project Settings): same as in the UV packer",
+        "Fill Empty UV Space (Project Settings): no black around islands",
         "Alpha: opacity from Principled Alpha or a Transparent mix",
         "Alpha opacity may come through a node group input",
         "Lighting Day/Evening (top): shows that state's bake",

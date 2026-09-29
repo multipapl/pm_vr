@@ -49,7 +49,7 @@ from .generated import (
 from .identity import find_layer, find_unit, unit_members
 from .scenarios import ScenarioSession, preflight as scenario_preflight
 from .setup_ops import bake_margin, bake_size, lightmap_resolution, preview_state, test_resolution_label
-from . import log, variants, viewport_overlay
+from . import log, uv_fill, variants, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
 
@@ -257,6 +257,25 @@ class BeautyBakeRuntime:
             "normal_b": bake.normal_b,
         })
 
+    def _fill_empty(self, path, label):
+        """Fill Empty UV Space (Project Settings) on the denoised PNG. A
+        failure keeps the black background and does not fail the bake."""
+        if not self.project.fill_empty_uv:
+            return
+        started = time.monotonic()
+        try:
+            share = uv_fill.fill_png(path, [receiver["mesh"] for receiver in self.receivers], self.margin)
+        except Exception as exc:
+            self.warnings.append(f"empty UV space not filled: {exc}")
+            log.warning("Beauty", f"{label}: empty UV space not filled, black kept: {exc}", with_traceback=True)
+            return
+        self.image.reload()
+        log.info(
+            "Beauty",
+            f"{label}: filled {share:.0%} of the atlas outside the UV islands "
+            f"({log.duration(time.monotonic() - started)})",
+        )
+
     def _finish_variant(self):
         """Keep the variant's PNG; the unit's generated result is untouched."""
         step_count = len(self.receivers) + 2
@@ -274,6 +293,9 @@ class BeautyBakeRuntime:
                     "Beauty",
                     f'{self.unit.display_name} variant "{self.variant.title}": denoise failed; using raw Beauty: {exc}',
                 )
+            self._fill_empty(
+                staged_file.staging_path, f'"{self.unit.display_name}" variant "{self.variant.title}"'
+            )
             commit_staged_file(staged_file, self.image, 'PNG')
         finally:
             staged_file.cleanup()
@@ -334,6 +356,7 @@ class BeautyBakeRuntime:
                     "Beauty",
                     f'{self.unit.display_name}: denoise failed; using raw Beauty: {exc}',
                 )
+            self._fill_empty(staged_file.staging_path, f'"{self.unit.display_name}"')
             _show_bake_stage(
                 self.operator,
                 "Build preview result",
@@ -842,7 +865,8 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             "Bake",
             f"Texture cache {'on' if getattr(render, 'use_texture_cache', False) else 'off'}"
             + (", auto generate" if getattr(render, 'use_auto_generate_texture_cache', False) else "")
-            + f"; autopack {'on' if bpy.data.use_autopack else 'off'}",
+            + f"; autopack {'on' if bpy.data.use_autopack else 'off'}"
+            + f"; empty UV space {'filled' if project.fill_empty_uv else 'black'}",
         )
         if project.bake_mode == 'LIGHTMAP':
             return self._execute_lightmap(context, states)

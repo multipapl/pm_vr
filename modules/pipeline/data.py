@@ -512,6 +512,15 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         precision=4,
     )
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)
+    fill_empty_uv: bpy.props.BoolProperty(
+        name="Fill Empty UV Space",
+        description=(
+            "After each bake, fill the atlas outside the UV islands and their margin with a smooth "
+            "continuation of the island colours, so mipmaps at a distance do not darken island edges. "
+            "Island pixels stay as baked. Off: black, as SimpleBake"
+        ),
+        default=True,
+    )
     default_unit_resolution: bpy.props.EnumProperty(
         name="Default Unit Resolution",
         items=RESOLUTION_ITEMS,
