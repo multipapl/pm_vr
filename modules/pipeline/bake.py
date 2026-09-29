@@ -863,17 +863,28 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 window=context.window,
             )
             context.window_manager.modal_handler_add(self)
-            result = self._start_next_job(context)
-            if result:
-                return result
-            return {'RUNNING_MODAL'}
+            self._handler_added = True
+            return self._running(self._start_next_job(context))
         except Exception as exc:
             self._failed += 1
             log.error("Beauty", f"Could not start modal bake: {exc}", with_traceback=True)
             if self._current_runtime:
                 self._current_runtime.fail(exc)
                 self._current_runtime = None
-            return self._finish_modal(context, cancelled=True)
+            return self._running(self._finish_modal(context, cancelled=True))
+
+    def _running(self, result):
+        """What execute() may return once the modal handler is registered.
+        A queue that already ended (every unit failed before a bake started)
+        still returns RUNNING_MODAL and ends from modal(): returning FINISHED
+        here left Blender a handler for a freed operator, and the status bar
+        crashed drawing its keys."""
+        if not result or 'RUNNING_MODAL' in result:
+            return {'RUNNING_MODAL'}
+        if not getattr(self, "_handler_added", False):
+            return result
+        self._ended_result = result
+        return {'RUNNING_MODAL'}
 
     def _request_cancel(self, reason):
         if not self._cancel_requested:
@@ -883,6 +894,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             self._feedback.add_message('WARNING', f"Cancelling: {reason}")
 
     def modal(self, context, event):
+        ended = getattr(self, "_ended_result", None)
+        if ended:
+            self._ended_result = None
+            return ended
         try:
             return self._modal(context, event)
         except Exception as exc:
