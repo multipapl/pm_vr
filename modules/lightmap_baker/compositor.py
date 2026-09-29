@@ -10,6 +10,7 @@ from .compositor_io import (
     load_compositor_exr,
     temporary_compositor_inputs,
 )
+from .images import replace_file
 
 
 def _compositor_tree(scene):
@@ -351,7 +352,7 @@ def denoise_external_beauty(active_scene, image, filepath):
         if not render_result:
             raise RuntimeError("Beauty compositor produced no Render Result")
         render_result.save_render(staging, scene=scene)
-        os.replace(staging, filepath)
+        replace_file(staging, filepath)
         image.reload()
     finally:
         if os.path.exists(staging):

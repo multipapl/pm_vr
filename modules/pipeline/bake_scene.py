@@ -628,6 +628,17 @@ def _joined_guide_object(receivers):
     return bpy.data.objects.new(mesh.name, mesh)
 
 
+def _image_editor_spaces():
+    manager = bpy.context.window_manager
+    return [
+        space
+        for window in (manager.windows if manager else ())
+        for area in window.screen.areas
+        for space in area.spaces
+        if space.type == 'IMAGE_EDITOR'
+    ]
+
+
 def bake_guides(context, receivers, albedo, normal, margin, samples):
     """Albedo (Diffuse Color) and object-space normal of the receivers for
     the denoiser: the receivers joined into one object (world space, so
@@ -636,6 +647,9 @@ def bake_guides(context, receivers, albedo, normal, margin, samples):
     a call per receiver took ~5 min for a unit of 27 books on UniPlace,
     this ~10 s. The receivers themselves are not changed."""
     source = context.scene
+    # A bake shows its image in the Image Editor; the guides are temporary,
+    # so an editor showing the atlas goes back to it afterwards.
+    shown = [(space, space.image) for space in _image_editor_spaces()]
     proxy = _joined_guide_object(receivers)
     objects = [proxy]
     scene = bpy.data.scenes.new(f"__PMVR_GUIDES_{uuid.uuid4().hex[:8]}")
@@ -694,6 +708,12 @@ def bake_guides(context, receivers, albedo, normal, margin, samples):
         mesh = proxy.data
         bpy.data.objects.remove(proxy)
         bpy.data.meshes.remove(mesh)
+        for space, image in shown:
+            try:
+                if space.image in (albedo, normal):
+                    space.image = image
+            except ReferenceError:
+                pass
 
 
 SIGNATURE_VERSION = "2:"

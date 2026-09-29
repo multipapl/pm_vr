@@ -2,6 +2,7 @@
 
 import os
 import re
+import time
 import uuid
 
 import bpy
@@ -111,6 +112,21 @@ def save_linear_exr(image, filepath):
         bpy.data.scenes.remove(export_scene)
 
 
+def replace_file(source, target, attempts=240, delay=0.25):
+    """os.replace that waits for a file another process holds for a moment:
+    on Windows a reader (the texture cache building its .tx, an antivirus
+    scan) makes the replace fail with PermissionError. Gives up after
+    about a minute and raises the last error."""
+    for attempt in range(attempts):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 class StagedExport:
     def __init__(self, final_path, staging_path):
         self.final_path = final_path
@@ -123,14 +139,14 @@ class StagedExport:
             self.backup_path = (
                 f"{self.final_path}.pm_lm_backup_{uuid.uuid4().hex}"
             )
-            os.replace(self.final_path, self.backup_path)
+            replace_file(self.final_path, self.backup_path)
 
         try:
-            os.replace(self.staging_path, self.final_path)
+            replace_file(self.staging_path, self.final_path)
             self.committed = True
         except Exception:
             if self.backup_path and os.path.exists(self.backup_path):
-                os.replace(self.backup_path, self.final_path)
+                replace_file(self.backup_path, self.final_path)
                 self.backup_path = ""
             raise
 
@@ -154,7 +170,7 @@ class StagedExport:
             if self.committed and os.path.isfile(self.final_path):
                 os.remove(self.final_path)
             if self.backup_path and os.path.exists(self.backup_path):
-                os.replace(self.backup_path, self.final_path)
+                replace_file(self.backup_path, self.final_path)
                 self.backup_path = ""
         finally:
             self.committed = False

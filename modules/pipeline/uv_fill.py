@@ -8,10 +8,14 @@ colours instead (pull-push: coarser and coarser averages of island pixels
 only, pushed back down), computed in linear light from the final 8-bit
 pixels, so no colour management touches it. Island pixels stay as baked."""
 
+import os
+import uuid
+
 import numpy
 
 import bpy
 
+from ..lightmap_baker.images import replace_file
 from .bake_files import _linear_to_srgb, _srgb_to_linear, write_encoded
 from .constants import BAKE_UV_NAME
 
@@ -169,5 +173,13 @@ def fill_png(path, meshes, margin):
     encoded = numpy.where(
         keep[..., None], codes / 255.0, numpy.rint(_linear_to_srgb(filled) * 255.0) / 255.0
     )
-    write_encoded(path, encoded)
+    # A new file, then a replace: the staged PNG may be open in another
+    # process for a moment (the texture cache reads new atlases).
+    filled_path = f"{os.path.splitext(path)[0]}.fill_{uuid.uuid4().hex[:8]}.png"
+    try:
+        write_encoded(filled_path, encoded)
+        replace_file(filled_path, path)
+    finally:
+        if os.path.exists(filled_path):
+            os.remove(filled_path)
     return empty

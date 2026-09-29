@@ -330,7 +330,7 @@ class BeautyBakeRuntime:
             share = uv_fill.fill_png(path, [receiver["mesh"] for receiver in self.receivers], self.margin)
         except Exception as exc:
             self.warnings.append(f"empty UV space not filled: {exc}")
-            log.warning("Beauty", f"{label}: empty UV space not filled, black kept: {exc}", with_traceback=True)
+            log.write("Beauty", f"{label}: empty UV space not filled, black kept: {exc}", level="WARNING", with_traceback=True)
             return
         self.image.reload()
         log.info(
