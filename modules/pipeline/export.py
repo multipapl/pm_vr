@@ -16,9 +16,10 @@ from .generated import (
     bind_generated_state,
     restore_generated_bindings,
     snapshot_generated_bindings,
+    use_bake_uv,
 )
 from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem, unit_members
-from . import export_colours, log, variants
+from . import export_colours, log, usd_check, variants
 from .setup_ops import baked_resolution
 from .state import activate_state
 
@@ -321,10 +322,40 @@ def _export_variants(context, project, layer, state, textures):
     return written, problems
 
 
+def _settle_uvs(objects, label):
+    """SimpleBake as active and render UV map on the generated objects about
+    to be written (see use_bake_uv); a file opened with the fix already has
+    it, this also covers a flag switched by hand since."""
+    switched = [obj.name for obj in objects if obj.get(TAG_GENERATED) and use_bake_uv(obj)]
+    if switched:
+        log.info(
+            "Export",
+            f"{label}: SimpleBake made active and render UV on {len(switched)} generated object(s): "
+            + ", ".join(switched[:10]) + (f" and {len(switched) - 10} more" if len(switched) > 10 else ""),
+        )
+
+
+def _check_written(path):
+    """A written USDZ counts as exported only when the Mac side reads it as
+    meant (usd_check). The file stays written; the problems go to the log."""
+    problems = usd_check.check_usd(path)
+    if not problems:
+        return
+    name = os.path.basename(path)
+    for problem in problems[:50]:
+        log.error("Export", f"USD check {name}: {problem}")
+    if len(problems) > 50:
+        log.error("Export", f"USD check {name}: {len(problems) - 50} more problem(s)")
+    raise PipelineExportError(
+        f"written, but the USD check found {len(problems)} problem(s); first: {problems[0]}"
+    )
+
+
 def _write_usdz(context, project, layer, objects, final_path, textures):
     folder, temporary_path = _temporary_export_path(final_path)
     assembly = _make_assembly(context.scene, layer, objects)
     render_disabled = [obj for obj in objects if obj.hide_render]
+    _settle_uvs(objects, os.path.basename(final_path))
     try:
         for obj in render_disabled:
             obj.hide_render = False
@@ -335,6 +366,7 @@ def _write_usdz(context, project, layer, objects, final_path, textures):
         if 'FINISHED' not in result or not os.path.exists(temporary_path):
             raise PipelineExportError(f"Blender did not produce {os.path.basename(final_path)}")
         os.replace(temporary_path, final_path)
+        _check_written(final_path)
     finally:
         for obj in render_disabled:
             obj.hide_render = True
@@ -378,6 +410,7 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         objects = resolve_layer_objects(context, layer)
         if not objects:
             return "SKIPPED", "no objects for the active state"
+        _settle_uvs(objects, f"{layer.display_name} ({format_name})")
         final_path = _export_path(project, layer, project.active_lighting_state, format_name)
         folder, temporary_path = _temporary_export_path(final_path)
         assembly = _make_assembly(context.scene, layer, objects)
@@ -401,6 +434,8 @@ def export_semantic_layer(context, layer, format_name, textures=None):
             raise PipelineExportError(f"Blender did not produce {format_name}")
         os.replace(temporary_path, final_path)
         log.info("Export", f"{layer.display_name} ({format_name}): {len(objects)} object(s) -> {final_path}")
+        if format_name == 'USDZ':
+            _check_written(final_path)
         if format_name == 'USDZ' and layer.layer_type == 'UNLIT':
             written, problems = _export_variants(
                 context, project, layer, project.active_lighting_state, textures

@@ -74,6 +74,52 @@ def _new_uv_and_image_nodes(material, image, principled):
                 for link in list(vector.links):
                     tree.links.remove(link)
                 tree.links.new(primary_uv.outputs["UV"], vector)
+    pin_normal_maps(material)
+
+
+def pin_normal_maps(material):
+    """A tangent-space Normal Map without a UV map takes its tangents from the
+    render UV map: UVMap while the source bakes, SimpleBake on the generated
+    object. Name UVMap so the result shades as the source did. Node groups
+    are shared with the source material and stay as they are."""
+    pinned = 0
+    for node in material.node_tree.nodes if material.node_tree else ():
+        if node.type == 'NORMAL_MAP' and node.space == 'TANGENT' and not node.uv_map:
+            node.uv_map = PRIMARY_UV_NAME
+            pinned += 1
+    return pinned
+
+
+def use_bake_uv(obj):
+    """Make SimpleBake both the active and the render UV map of a generated
+    object; True when that changed anything.
+
+    The bake copy renders with UVMap and the generated object inherits its
+    mesh. Blender's USD export renames the render UV map to "st" on the mesh
+    but the active one in materials, so only SimpleBake in both places gives
+    the atlas on "st" and the authored layout on "UVMap"."""
+    uv_layers = obj.data.uv_layers if obj.type == 'MESH' else None
+    bake_uv = uv_layers.get(BAKE_UV_NAME) if uv_layers else None
+    if not bake_uv or (uv_layers.active == bake_uv and bake_uv.active_render):
+        return False
+    uv_layers.active = bake_uv
+    bake_uv.active_render = True
+    return True
+
+
+def settle_generated_uvs():
+    """Files baked before use_bake_uv(): switch every generated result to
+    SimpleBake and pin the normal maps of generated materials. Returns the
+    number of objects switched and normal maps pinned."""
+    switched = sum(
+        use_bake_uv(obj) for obj in bpy.data.objects
+        if obj.get(TAG_GENERATED) and obj.get(TAG_MODE) == 'BEAUTY'
+    )
+    pinned = sum(
+        pin_normal_maps(material) for material in bpy.data.materials
+        if material.get(TAG_GENERATED) and material.get(TAG_MODE, 'BEAUTY') == 'BEAUTY'
+    )
+    return switched, pinned
 
 
 def _prune_unreachable_material_nodes(material):
@@ -470,6 +516,9 @@ def commit_generated_geometry(context, unit, layer, receivers, signature, mode='
         # parent above can never shift this object.
         generated.matrix_world = source.matrix_world.copy()
     _relink_generated_children(unit, layer, generated_by_source, mode)
+    if mode == 'BEAUTY':
+        for generated in generated_by_source.values():
+            use_bake_uv(generated)
     if mode == 'BEAUTY' and not compatible:
         if unit.day_signature and not same_structure(unit.day_signature, signature):
             unit.day_status = "Structurally incompatible — rebake required"

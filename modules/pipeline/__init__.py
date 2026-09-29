@@ -26,6 +26,7 @@ def _load_post(_filepath):
     # Files saved by earlier versions may hold generated state materials
     # without a fake user; protect them before the next save drops them.
     generated.protect_all_generated_materials()
+    _settle_generated_uvs()
     restored = bake_scene.recover_interrupted_bake()
     restored += scenarios.recover_interrupted_scenarios()
     if restored:
@@ -40,6 +41,16 @@ def _load_post(_filepath):
     setup_ops.reset_test_resolution()
     scenarios.prune_scenarios()
     scenarios.sync_scenarios(force=True)
+
+
+def _settle_generated_uvs():
+    switched, pinned = generated.settle_generated_uvs()
+    if switched or pinned:
+        log.info(
+            "Setup",
+            f"UV maps: SimpleBake made active and render UV on {switched} generated object(s), "
+            f"{pinned} normal map node(s) pinned to UVMap",
+        )
 
 
 def _separate_copies(force):
@@ -88,6 +99,7 @@ def register():
     try:
         identity.remember_identity_owners()
         generated.protect_all_generated_materials()
+        _settle_generated_uvs()
         setup_ops.release_roleless_members()
         setup_ops.cap_removed_resolutions()
         scenarios.prune_scenarios()
