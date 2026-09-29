@@ -848,6 +848,38 @@ def selected_unit_ids(context):
     return unit_ids
 
 
+def queue_units(project, unit_ids):
+    """Put units in the bake queue. A unit already queued but marked as baked
+    in it (it waits for the other state) is queued again: its marks are
+    cleared, so the next Bake bakes it for every checked state.
+    Returns (added, requeued, already)."""
+    entries = {entry.unit_id: entry for entry in project.bake_queue}
+    added = requeued = already = 0
+    for unit_id in unit_ids:
+        entry = entries.get(unit_id)
+        if entry is None:
+            entries[unit_id] = project.bake_queue.add()
+            entries[unit_id].unit_id = unit_id
+            added += 1
+        elif entry.day_done or entry.evening_done:
+            entry.day_done = entry.evening_done = False
+            requeued += 1
+        else:
+            already += 1
+    if added:
+        project.active_bake_queue_index = len(project.bake_queue) - 1
+    return added, requeued, already
+
+
+def queue_message(added, requeued, already, what="unit(s)"):
+    message = f"Queued {added} {what}"
+    if requeued:
+        message += f", {requeued} queued again (baked earlier in this queue)"
+    if already:
+        message += f", {already} already queued"
+    return message
+
+
 class PMVR_OT_QueueSelectedUnits(bpy.types.Operator):
     bl_idname = "pmvr.queue_selected_units"
     bl_label = "Add Selected Units"
@@ -856,18 +888,10 @@ class PMVR_OT_QueueSelectedUnits(bpy.types.Operator):
 
     def execute(self, context):
         project = context.scene.pm_vr_project
-        existing = {entry.unit_id for entry in project.bake_queue}
-        added = 0
-        for unit_id in selected_unit_ids(context):
-            if unit_id in existing or not find_unit(project, unit_id):
-                continue
-            project.bake_queue.add().unit_id = unit_id
-            existing.add(unit_id)
-            added += 1
-        if added:
-            project.active_bake_queue_index = len(project.bake_queue) - 1
-        self.report({'INFO'}, f"Added {added} complete unit(s) to the queue")
-        return {'FINISHED'} if added else {'CANCELLED'}
+        unit_ids = [unit_id for unit_id in selected_unit_ids(context) if find_unit(project, unit_id)]
+        added, requeued, already = queue_units(project, unit_ids)
+        self.report({'INFO'}, queue_message(added, requeued, already))
+        return {'FINISHED'} if added or requeued else {'CANCELLED'}
 
 
 class PMVR_OT_QueueLayerUnits(bpy.types.Operator):
@@ -887,29 +911,17 @@ class PMVR_OT_QueueLayerUnits(bpy.types.Operator):
     def execute(self, context):
         project = context.scene.pm_vr_project
         layer = active_layer(project)
-        queued = {entry.unit_id for entry in project.bake_queue}
         occupied = units_with_members()
-        added = already = empty = 0
-        for unit in project.bake_units:
-            if unit.render_layer_id != layer.layer_id:
-                continue
-            if unit.unit_id in queued:
-                already += 1
-            elif unit.unit_id not in occupied:
-                empty += 1
-            else:
-                project.bake_queue.add().unit_id = unit.unit_id
-                queued.add(unit.unit_id)
-                added += 1
-        if added:
-            project.active_bake_queue_index = len(project.bake_queue) - 1
-        message = f'Queued {added} unit(s) of "{layer.display_name}"'
-        if already:
-            message += f", {already} already queued"
+        units = [unit for unit in project.bake_units if unit.render_layer_id == layer.layer_id]
+        empty = sum(1 for unit in units if unit.unit_id not in occupied)
+        added, requeued, already = queue_units(
+            project, [unit.unit_id for unit in units if unit.unit_id in occupied]
+        )
+        message = queue_message(added, requeued, already, f'unit(s) of "{layer.display_name}"')
         if empty:
             message += f", {empty} without objects skipped"
-        self.report({'INFO'} if added else {'WARNING'}, message)
-        return {'FINISHED'} if added else {'CANCELLED'}
+        self.report({'INFO'} if added or requeued else {'WARNING'}, message)
+        return {'FINISHED'} if added or requeued else {'CANCELLED'}
 
 
 class PMVR_OT_QueueActiveUnit(bpy.types.Operator):
@@ -921,12 +933,9 @@ class PMVR_OT_QueueActiveUnit(bpy.types.Operator):
         unit = active_unit(project)
         if not unit:
             return {'CANCELLED'}
-        if any(entry.unit_id == unit.unit_id for entry in project.bake_queue):
-            self.report({'INFO'}, "Unit is already queued")
-            return {'CANCELLED'}
-        project.bake_queue.add().unit_id = unit.unit_id
-        project.active_bake_queue_index = len(project.bake_queue) - 1
-        return {'FINISHED'}
+        added, requeued, already = queue_units(project, [unit.unit_id])
+        self.report({'INFO'}, queue_message(added, requeued, already))
+        return {'FINISHED'} if added or requeued else {'CANCELLED'}
 
 
 class PMVR_OT_RemoveQueueEntry(bpy.types.Operator):
