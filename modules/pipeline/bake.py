@@ -22,6 +22,7 @@ from .bake_scene import (
     EvaluationSnapshot,
     PipelineBakeCancelled,
     PipelineBakeError,
+    bake_guides,
     bake_receivers,
     clear_collection,
     copy_receiver,
@@ -276,13 +277,11 @@ class BeautyBakeRuntime:
         albedo = create_float_image(f"__PMVR_ALBEDO_{token}", self.bake_size, (1.0, 1.0, 1.0, 1.0))
         normal = create_float_image(f"__PMVR_NORMAL_{token}", self.bake_size, (0.5, 0.5, 1.0, 1.0))
         scene = self.context.scene
+        log.info("Beauty", f"{label}: baking denoise guides for {len(self.receivers)} object(s)")
         try:
-            scene.cycles.samples = GUIDE_SAMPLES
             try:
-                bake_receivers(self.context, self.receivers, albedo, 'DIFFUSE', self.margin, {'COLOR'})
-                bake_receivers(self.context, self.receivers, normal, 'NORMAL', self.margin)
+                bake_guides(self.context, self.receivers, albedo, normal, self.margin, GUIDE_SAMPLES)
             finally:
-                scene.cycles.samples = self.project.cycles_samples
                 for receiver in self.receivers:
                     set_target_image(receiver, self.image)
             guides = time.monotonic()

@@ -220,6 +220,10 @@ def recover_interrupted_bake():
         if collection.get("pmvr_temporary_work"):
             remove_work_collection(collection)
             restored += 1
+    for scene in list(bpy.data.scenes):
+        if scene.get(GUIDE_SCENE_TAG):
+            bpy.data.scenes.remove(scene)
+            restored += 1
     return restored
 
 
@@ -587,6 +591,109 @@ def bake_receivers(
                 raise PipelineBakeCancelled(f"{bake_type} bake was cancelled")
     finally:
         config.restore()
+
+
+GUIDE_SCENE_TAG = "pmvr_temporary_guides"
+
+
+def _joined_guide_object(receivers):
+    """One mesh of every receiver in world space with their materials, so
+    a guide is one bake of one object. Blender prepares the whole atlas
+    for each object it bakes; 27 objects took 150 s where one takes 5 s."""
+    import bmesh
+
+    joined = bmesh.new()
+    materials = []
+    for receiver in receivers:
+        part = receiver["mesh"].copy()
+        try:
+            part.transform(receiver["object"].matrix_world)
+            offset = len(materials)
+            materials.extend(part.materials)
+            if offset:
+                indices = array('i', [0]) * len(part.polygons)
+                part.polygons.foreach_get("material_index", indices)
+                part.polygons.foreach_set("material_index", array('i', (index + offset for index in indices)))
+            joined.from_mesh(part)
+        finally:
+            bpy.data.meshes.remove(part)
+    mesh = bpy.data.meshes.new(f"__PMVR_GUIDES_{uuid.uuid4().hex[:8]}")
+    joined.to_mesh(mesh)
+    joined.free()
+    for material in materials:
+        mesh.materials.append(material)
+    # As on each receiver: bake into SimpleBake, textures read through UVMap.
+    mesh.uv_layers.active = mesh.uv_layers[BAKE_UV_NAME]
+    mesh.uv_layers[PRIMARY_UV_NAME].active_render = True
+    return bpy.data.objects.new(mesh.name, mesh)
+
+
+def bake_guides(context, receivers, albedo, normal, margin, samples):
+    """Albedo (Diffuse Color) and object-space normal of the receivers for
+    the denoiser: the receivers joined into one object (world space, so
+    its object space is the world's), in a scene holding only it. One
+    Cycles call per guide that syncs one object instead of the whole scene;
+    a call per receiver took ~5 min for a unit of 27 books on UniPlace,
+    this ~10 s. The receivers themselves are not changed."""
+    source = context.scene
+    proxy = _joined_guide_object(receivers)
+    objects = [proxy]
+    scene = bpy.data.scenes.new(f"__PMVR_GUIDES_{uuid.uuid4().hex[:8]}")
+    scene[GUIDE_SCENE_TAG] = True
+    try:
+        scene.render.engine = 'CYCLES'
+        scene.cycles.device = source.cycles.device
+        scene.cycles.samples = samples
+        # Textures as the Combined bake reads them: the file's texture cache
+        # (already generated) and texture limit, not every image at full size.
+        for owner, name in (
+            ("render", "use_texture_cache"), ("render", "use_auto_generate_texture_cache"),
+            ("render", "use_simplify"), ("cycles", "texture_limit_render"),
+        ):
+            try:
+                setattr(getattr(scene, owner), name, getattr(getattr(source, owner), name))
+            except AttributeError:
+                pass
+        for obj in objects:
+            scene.collection.objects.link(obj)
+        view_layer = scene.view_layers[0]
+        for obj in objects:
+            obj.select_set(True, view_layer=view_layer)
+        view_layer.objects.active = objects[0]
+        for image, kwargs in (
+            (albedo, {"type": 'DIFFUSE', "pass_filter": {'COLOR'}}),
+            (normal, {"type": 'NORMAL', "normal_space": 'OBJECT'}),
+        ):
+            for receiver in receivers:
+                set_target_image(receiver, image)
+            kwargs.update({
+                "target": 'IMAGE_TEXTURES',
+                "use_clear": False,
+                "use_selected_to_active": False,
+                "margin": margin,
+                "margin_type": 'ADJACENT_FACES',
+            })
+            with context.temp_override(
+                scene=scene,
+                view_layer=view_layer,
+                active_object=objects[0],
+                object=objects[0],
+                selected_objects=objects,
+                selected_editable_objects=objects,
+            ):
+                try:
+                    result = bpy.ops.object.bake(**supported_bake_kwargs(kwargs))
+                except RuntimeError as exc:
+                    if "cancel" in str(exc).lower():
+                        raise PipelineBakeCancelled(str(exc)) from exc
+                    raise
+            if 'FINISHED' not in result:
+                raise PipelineBakeCancelled(f"{kwargs['type']} guide bake was cancelled")
+    finally:
+        bpy.data.scenes.remove(scene)
+        mesh = proxy.data
+        bpy.data.objects.remove(proxy)
+        bpy.data.meshes.remove(mesh)
 
 
 SIGNATURE_VERSION = "2:"
