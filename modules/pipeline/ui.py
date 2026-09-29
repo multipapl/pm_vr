@@ -166,6 +166,9 @@ def draw_setup(layout, context):
     controls = row.column(align=True)
     controls.operator("pmvr.add_render_layer", text="", icon='ADD')
     controls.operator("pmvr.remove_render_layer", text="", icon='REMOVE')
+    controls.separator()
+    controls.operator("pmvr.move_render_layer", text="", icon='TRIA_UP').direction = 'UP'
+    controls.operator("pmvr.move_render_layer", text="", icon='TRIA_DOWN').direction = 'DOWN'
     layer = active_layer(project)
     if layer:
         detail = layers.column(align=True)

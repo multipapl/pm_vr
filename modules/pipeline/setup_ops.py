@@ -930,6 +930,28 @@ class PMVR_OT_MoveQueueEntry(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class PMVR_OT_MoveRenderLayer(bpy.types.Operator):
+    bl_idname = "pmvr.move_render_layer"
+    bl_label = "Move Render Layer"
+    bl_description = "Move the highlighted render layer up or down the list"
+    bl_options = {'REGISTER', 'UNDO'}
+    direction: bpy.props.EnumProperty(items=(('UP', "Up", ""), ('DOWN', "Down", "")))
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.scene.pm_vr_project.render_layers) > 1 and structure_editable(context)
+
+    def execute(self, context):
+        project = context.scene.pm_vr_project
+        index = min(project.active_render_layer_index, len(project.render_layers) - 1)
+        target = index - 1 if self.direction == 'UP' else index + 1
+        if target < 0 or target >= len(project.render_layers):
+            return {'CANCELLED'}
+        project.render_layers.move(index, target)
+        project.active_render_layer_index = target
+        return {'FINISHED'}
+
+
 class PMVR_OT_SetLightingState(bpy.types.Operator):
     bl_idname = "pmvr.set_lighting_state"
     bl_label = "Set Lighting State"
@@ -1187,6 +1209,7 @@ CLASSES = (
     PMVR_OT_RemoveQueueEntry,
     PMVR_OT_ClearBakeQueue,
     PMVR_OT_MoveQueueEntry,
+    PMVR_OT_MoveRenderLayer,
     PMVR_OT_SetLightingState,
     PMVR_OT_ValidatePipeline,
     PMVR_OT_RegisterDuplicateAsNew,
