@@ -11,6 +11,7 @@ from . import (
     generated,
     identity,
     log,
+    probes,
     scenarios,
     scene_debug,
     selection_sync,
@@ -86,7 +87,7 @@ _HANDLERS = (
 
 
 def register():
-    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES):
+    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES):
         bpy.utils.register_class(cls)
     data.register_properties()
     selection_sync.register()
@@ -116,11 +117,12 @@ def unregister():
         if handler in handlers:
             handlers.remove(handler)
     bake.shutdown()
+    probes.shutdown()
     scene_debug.unregister()
     viewport_overlay.unregister()
     selection_sync.unregister()
     data.unregister_properties()
-    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES)):
+    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES)):
         bpy.utils.unregister_class(cls)
 
 

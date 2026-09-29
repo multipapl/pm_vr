@@ -12,6 +12,7 @@ from .identity import (
     unit_members,
     units_with_members,
 )
+from .probes import probe_cameras, probe_directory, probe_states
 from .scenarios import Scope, active_scenario, switched_off_count
 from .variants import variant_problem, variant_status
 from .setup_ops import (
@@ -405,7 +406,7 @@ def draw_bake(layout, context):
     run = queue.row()
     run.scale_y = 1.4
     if project.operation_running:
-        run.operator("pmvr.cancel_bake_queue", text="Cancel Bake (Esc)", icon='CANCEL')
+        run.operator("pmvr.cancel_bake_queue", text="Cancel (Esc)", icon='CANCEL')
     else:
         run.operator(
             "pmvr.bake_queue",
@@ -416,6 +417,7 @@ def draw_bake(layout, context):
             ),
             icon='RENDER_STILL',
         )
+    draw_probes(layout, project)
     if project.last_operation_summary:
         layout.label(text=project.last_operation_summary, icon='INFO')
 
@@ -426,6 +428,22 @@ def draw_bake(layout, context):
     row.prop(project, "show_generated", toggle=True)
     op = preview.operator("pmvr.select_pipeline_items", text="Select Baked Output", icon='RESTRICT_SELECT_OFF')
     op.target = 'UNIT_GENERATED'
+
+
+def draw_probes(layout, project):
+    box = layout.box()
+    states = probe_states(project)
+    cameras = {camera.name for state in states for camera in probe_cameras(project, state)}
+    jobs = sum(len(probe_cameras(project, state)) for state in states)
+    box.label(text=f"Probes: {len(cameras)} panoramic camera(s) in Runtime", icon='WORLD')
+    row = box.row()
+    row.enabled = bool(jobs)
+    row.operator(
+        "pmvr.render_probes",
+        text=f"Render {jobs} Probe(s)" + (f" • {' + '.join(s.title() for s in states)}" if states else ""),
+        icon='RENDER_STILL',
+    )
+    box.label(text=f"EXR Half ZIP -> {probe_directory(project)}", icon='FILE_FOLDER')
 
 
 def draw_export(layout, context):
@@ -516,7 +534,7 @@ HELP_SECTIONS = (
         "Lighting Day/Evening (top): shows that state's bake",
         "A lighting state switches on with all its nested collections",
         "Modifiers must not add or remove material slots",
-        "Esc or Cancel Bake: stops the queue, current unit discarded",
+        "Esc or Cancel: stops the queue, current unit discarded",
         "Bake Resolution (Project Settings): size of the baked files",
         "Unit resolution can change after a bake: no rebake needed",
         "Layers and units are locked while baking",
@@ -543,6 +561,17 @@ HELP_SECTIONS = (
         "Additional exports: same layer type only",
         "Selection and visibility are ignored: all assigned objects export",
         "Only inside Evening lighting collection: Evening export only",
+        "USD: st = baked atlas (SimpleBake), UVMap = authored layout",
+        "Each USDZ is checked after writing; problems count as failed",
+    )),
+    ("Probes", 'WORLD', (
+        "Probe: panoramic equirectangular camera in a Runtime layer",
+        "Render Probes (Bake): one EXR per camera and checked state",
+        "File: the camera's USD name, _Evening for Evening",
+        "EXR Half ZIP (Apple cannot read DWAA)",
+        "Lit like the bake: generated results hidden, state lighting on",
+        "World-aligned (+Y ahead, Z up): camera rotation is ignored",
+        "Folder: Project Settings, default probes/ next to the USDZ folder",
     )),
 )
 

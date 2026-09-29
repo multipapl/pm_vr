@@ -518,6 +518,18 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     lightmap_output_directory: bpy.props.StringProperty(name="Lightmap Directory", subtype='DIR_PATH', default="//Lightmaps/")
     usdz_output_directory: bpy.props.StringProperty(name="USDZ Directory", subtype='DIR_PATH', default="//USDZ/")
     glb_output_directory: bpy.props.StringProperty(name="GLB Directory", subtype='DIR_PATH', default="//GLB/")
+    probe_output_directory: bpy.props.StringProperty(
+        name="Probe Directory",
+        description="Where Render Probes writes its EXR panoramas; empty: a probes folder next to the USDZ folder",
+        subtype='DIR_PATH',
+        default="",
+    )
+    probe_width: bpy.props.EnumProperty(
+        name="Probe Size",
+        description="Width of a probe panorama; the height is half of it",
+        items=tuple((str(width), f"{width} × {width // 2}", "") for width in (512, 1024, 2048)),
+        default='1024',
+    )
 
     render_layers: bpy.props.CollectionProperty(type=PMVR_RenderLayer)
     active_render_layer_index: bpy.props.IntProperty(default=0, min=0, update=_active_layer_changed)
