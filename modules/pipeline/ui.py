@@ -183,6 +183,9 @@ def draw_setup(layout, context):
         nav = detail.row(align=True)
         op = nav.operator("pmvr.select_pipeline_items", text=f"Select {len(layer_members(layer.layer_id))} Sources")
         op.target = 'LAYER_SOURCES'
+        if layer.layer_type in BAKE_LAYER_TYPES:
+            units = sum(1 for unit in project.bake_units if unit.render_layer_id == layer.layer_id)
+            nav.operator("pmvr.queue_layer_units", text=f"Queue {units} Units", icon='RENDER_STILL')
 
     if layer and layer.layer_type not in BAKE_LAYER_TYPES:
         draw_original_objects(layout, layer, layer_members(layer.layer_id))
@@ -534,6 +537,7 @@ HELP_SECTIONS = (
         "Lighting Day/Evening (top): shows that state's bake",
         "A lighting state switches on with all its nested collections",
         "Modifiers must not add or remove material slots",
+        "Setup layer Queue N Units: the whole layer into the queue",
         "Esc or Cancel: stops the queue, current unit discarded",
         "Bake Resolution (Project Settings): size of the baked files",
         "Unit resolution can change after a bake: no rebake needed",

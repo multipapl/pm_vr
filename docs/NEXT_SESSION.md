@@ -123,6 +123,10 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 - UniPlace: 22 probes (Day + Evening) in 5m 14s on OptiX with the texture cache (manual renders took ~1.5-3.5 min each). Compared with the manual probes (rendered 09-27 from Uniplace_upd2_CleanUp.blend): Kitchen01 same orientation (correlation 0.96); the manual LivingRoom01 was turned 178.6 degrees like its camera; the add-on probes are ~1.4x brighter, uniformly over the panorama (current Day lighting with its nested groups and the texture cache, as the atlases). Manual probes (ZIP) kept in `UniPlace/probes_manual_zip_2026-09-29`, DWAA originals in `UniPlace/probes_DWAA_backup_2026-09-29`.
 - Regression: `tests/blender_probes_smoke.py` (orientation with a turned camera, Day/Evening content, linear values under AgX, hidden generated and outside-Source-Root objects, USD names, ZIP half, full restore, refusal) and `tests/blender_gui_probes.py` (finish / esc / button; in run_tests.bat gui).
 
+## Queue a whole layer (2026-09-29)
+
+- Setup, layer detail: **Queue N Units** (`pmvr.queue_layer_units`, baked layer types only) adds every unit of the active layer to the bake queue in list order; units already queued and units without objects are skipped and counted in the report. On UniPlace the 11 baked layers queue all 251 units. Test: `tests/blender_queue_layer_smoke.py`.
+
 ## Ideas from the user (2026-09-29, not started)
 
 - UV adequacy check for all bake units, by rasterising each unit's SimpleBake triangles at the bake size: overlaps between islands and folded faces inside one, gaps below the island padding (dilate each island by padding x size), outside 0-1, zero-area and flipped faces, stretch (UV vs 3D area), texel density spread, atlas fill. A "check all units" list plus a Scene Debug highlight next to UV Health.

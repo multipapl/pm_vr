@@ -870,6 +870,48 @@ class PMVR_OT_QueueSelectedUnits(bpy.types.Operator):
         return {'FINISHED'} if added else {'CANCELLED'}
 
 
+class PMVR_OT_QueueLayerUnits(bpy.types.Operator):
+    bl_idname = "pmvr.queue_layer_units"
+    bl_label = "Queue Layer Units"
+    bl_description = (
+        "Add every unit of the active render layer to the bake queue, in list "
+        "order; units already queued and units without objects are skipped"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        layer = active_layer(context.scene.pm_vr_project)
+        return bool(layer and layer.layer_type in BAKE_LAYER_TYPES)
+
+    def execute(self, context):
+        project = context.scene.pm_vr_project
+        layer = active_layer(project)
+        queued = {entry.unit_id for entry in project.bake_queue}
+        occupied = units_with_members()
+        added = already = empty = 0
+        for unit in project.bake_units:
+            if unit.render_layer_id != layer.layer_id:
+                continue
+            if unit.unit_id in queued:
+                already += 1
+            elif unit.unit_id not in occupied:
+                empty += 1
+            else:
+                project.bake_queue.add().unit_id = unit.unit_id
+                queued.add(unit.unit_id)
+                added += 1
+        if added:
+            project.active_bake_queue_index = len(project.bake_queue) - 1
+        message = f'Queued {added} unit(s) of "{layer.display_name}"'
+        if already:
+            message += f", {already} already queued"
+        if empty:
+            message += f", {empty} without objects skipped"
+        self.report({'INFO'} if added else {'WARNING'}, message)
+        return {'FINISHED'} if added else {'CANCELLED'}
+
+
 class PMVR_OT_QueueActiveUnit(bpy.types.Operator):
     bl_idname = "pmvr.queue_active_unit"
     bl_label = "Add Active Unit"
@@ -1209,6 +1251,7 @@ CLASSES = (
     PMVR_OT_RemoveEmptyUnits,
     PMVR_OT_RemoveSelectedFromUnit,
     PMVR_OT_QueueSelectedUnits,
+    PMVR_OT_QueueLayerUnits,
     PMVR_OT_QueueActiveUnit,
     PMVR_OT_RemoveQueueEntry,
     PMVR_OT_ClearBakeQueue,
