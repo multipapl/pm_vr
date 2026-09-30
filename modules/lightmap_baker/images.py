@@ -90,9 +90,7 @@ def _set_standard_view(owner):
 
 
 def save_linear_exr(image, filepath):
-    export_scene = bpy.data.scenes.new(
-        name=f"__PM_LM_EXPORT_{uuid.uuid4().hex}"
-    )
+    export_scene = temporary_scene("__PMVR_EXR_EXPORT")
     try:
         settings = export_scene.render.image_settings
         settings.file_format = 'OPEN_EXR'
@@ -110,6 +108,19 @@ def save_linear_exr(image, filepath):
         image.save_render(filepath, scene=export_scene)
     finally:
         bpy.data.scenes.remove(export_scene)
+
+
+def temporary_scene(name):
+    """A new scene named exactly name, replacing a leftover of the same name.
+
+    Blender keeps a scene's render buffers under the scene's name after the
+    scene is removed. A unique name per use leaked them: ~0.6 GB for every
+    4K compositor denoise, 135 GB after a night of baking, and Blender ran
+    out of memory. One fixed name per purpose reuses the same buffers."""
+    leftover = bpy.data.scenes.get(name)
+    if leftover is not None:
+        bpy.data.scenes.remove(leftover)
+    return bpy.data.scenes.new(name)
 
 
 def replace_file(source, target, attempts=240, delay=0.25):

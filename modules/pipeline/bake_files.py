@@ -7,7 +7,7 @@ import uuid
 import bpy
 import numpy
 
-from ..lightmap_baker.images import StagedExport, save_linear_exr
+from ..lightmap_baker.images import StagedExport, save_linear_exr, temporary_scene
 from .bake_scene import PipelineBakeError
 from .identity import find_layer, safe_stem
 
@@ -74,9 +74,7 @@ def stage_beauty_image(context, unit, state, image, variant=""):
         "",
     )
     staged.staging_path = _staging_path(staged.final_path)
-    export_scene = bpy.data.scenes.new(
-        f"__PMVR_BEAUTY_EXPORT_{uuid.uuid4().hex}"
-    )
+    export_scene = temporary_scene("__PMVR_BEAUTY_EXPORT")
     try:
         settings = export_scene.render.image_settings
         settings.file_format = 'PNG'

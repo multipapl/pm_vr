@@ -13,6 +13,7 @@ import uuid
 import bpy
 import numpy
 
+from .lightmap_baker.images import temporary_scene
 from .pipeline.bake_files import scaled_linear
 
 
@@ -178,7 +179,7 @@ def output_size(dimensions, long_side):
 def _bake_outputs(context, material, plan, width, height):
     """Linear RGB arrays, one per selected output, rendered on a unit plane
     whose UVs span 0-1: each pixel samples the selection at its UV."""
-    scene = bpy.data.scenes.new(f"__PMVR_FLATTEN_{uuid.uuid4().hex[:8]}")
+    scene = temporary_scene("__PMVR_FLATTEN")
     mesh = bpy.data.meshes.new("__PMVR_FLATTEN")
     mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
     names = ["UVMap"] + sorted({plan.uv_map} - {"", "UVMap"})

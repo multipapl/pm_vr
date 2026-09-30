@@ -20,6 +20,7 @@ import uuid
 import bpy
 import numpy
 
+from ..lightmap_baker.images import temporary_scene
 from . import log
 
 
@@ -34,7 +35,7 @@ def blackbody_colour(context, kelvin):
     key = round(float(kelvin), 3)
     if key in _BLACKBODY:
         return _BLACKBODY[key]
-    scene = bpy.data.scenes.new(f"__PMVR_BLACKBODY_{uuid.uuid4().hex[:8]}")
+    scene = temporary_scene("__PMVR_BLACKBODY")
     mesh = bpy.data.meshes.new("__PMVR_BLACKBODY")
     mesh.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], [], [(0, 1, 2, 3)])
     uv = mesh.uv_layers.new(name="UVMap")

@@ -6,7 +6,7 @@ import uuid
 
 import bpy
 
-from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image
+from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image, release_compositor_scene
 from ..lightmap_baker.images import create_float_image, remove_image
 from ..lightmap_baker.progress import BakeProgressFeedback
 from ..lightmap_baker.state import ContextState
@@ -1197,6 +1197,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             self._scenarios.restore()
         except Exception:
             pass
+        try:
+            release_compositor_scene()
+        except Exception:
+            pass
         _remove_bake_job_handlers()
         _QUEUE["running"] = False
         _QUEUE["cancel_requested"] = False
@@ -1231,6 +1235,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             self._scenarios.restore()
         except Exception as exc:
             log.error("Bake", f"Could not restore scenario collections: {exc}", with_traceback=True)
+        try:
+            release_compositor_scene()
+        except Exception as exc:
+            log.warning("Bake", f"Could not remove the denoise compositor scene: {exc}")
         restore_viewport_shading(self._viewport_shading)
         state_label = " + ".join(state.title() for state in self._states)
         summary = (
@@ -1333,6 +1341,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 self._scenarios.restore()
             except Exception as exc:
                 log.error("Bake", f"Could not restore scenario collections: {exc}", with_traceback=True)
+            try:
+                release_compositor_scene()
+            except Exception as exc:
+                log.warning("Bake", f"Could not remove the denoise compositor scene: {exc}")
         state_label = " + ".join(state.title() for state in states)
         summary = (
             f"Lightmap ({state_label}): {succeeded} ready, "

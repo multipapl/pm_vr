@@ -6,6 +6,8 @@ import uuid
 
 import bpy
 
+from ..lightmap_baker.compositor import COMPOSITOR_TAG, release_compositor_scene
+from ..lightmap_baker.images import temporary_scene
 from ..lightmap_baker.receiver import _wrap_surface_for_bake
 from .constants import (
     BAKE_UV_NAME,
@@ -224,6 +226,9 @@ def recover_interrupted_bake():
         if scene.get(GUIDE_SCENE_TAG):
             bpy.data.scenes.remove(scene)
             restored += 1
+    if any(scene.get(COMPOSITOR_TAG) for scene in bpy.data.scenes):
+        release_compositor_scene()
+        restored += 1
     return restored
 
 
@@ -652,7 +657,7 @@ def bake_guides(context, receivers, albedo, normal, margin, samples):
     shown = [(space, space.image) for space in _image_editor_spaces()]
     proxy = _joined_guide_object(receivers)
     objects = [proxy]
-    scene = bpy.data.scenes.new(f"__PMVR_GUIDES_{uuid.uuid4().hex[:8]}")
+    scene = temporary_scene("__PMVR_GUIDES")
     scene[GUIDE_SCENE_TAG] = True
     try:
         scene.render.engine = 'CYCLES'

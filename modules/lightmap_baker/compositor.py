@@ -1,7 +1,6 @@
 """Temporary scene-compositor denoise with albedo and normal guides."""
 
 import os
-import uuid
 
 import bpy
 
@@ -76,6 +75,54 @@ def _create_camera(scene, token):
     return camera, camera_data
 
 
+COMPOSITOR_SCENE = "__PMVR_COMPOSITOR"
+COMPOSITOR_TAG = "pmvr_compositor_scene"
+
+
+def _compositor_scene(active_scene, width, height):
+    """The scene every denoise renders: made once and reused. Blender keeps
+    a rendered scene's buffers until it quits, even after the scene is
+    removed; a new scene per denoise leaked ~0.6 GB each at 4K, and a night
+    of baking ran Blender out of memory (135 GB). Returns (scene, tree,
+    group) with the tree emptied; group: the tree is a node group (Blender
+    5), whose output is a Group Output node."""
+    scene = next((item for item in bpy.data.scenes if item.get(COMPOSITOR_TAG)), None)
+    if scene is None:
+        scene = bpy.data.scenes.new(COMPOSITOR_SCENE)
+        scene[COMPOSITOR_TAG] = True
+        for engine in ('BLENDER_EEVEE_NEXT', 'BLENDER_EEVEE', 'BLENDER_WORKBENCH'):
+            try:
+                scene.render.engine = engine
+                break
+            except (TypeError, ValueError):
+                continue
+    if scene.camera is None:
+        _create_camera(scene, "compositor")
+    scene.render.resolution_x = width
+    scene.render.resolution_y = height
+    scene.render.resolution_percentage = 100
+    _copy_compositor_settings(active_scene, scene)
+    tree, _created = _compositor_tree(scene)
+    tree.nodes.clear()
+    group = getattr(scene, "compositing_node_group", None) is tree
+    return scene, tree, group
+
+
+def release_compositor_scene():
+    """Remove the reused compositor scene (end of a bake queue, file load)."""
+    for scene in [item for item in bpy.data.scenes if item.get(COMPOSITOR_TAG)]:
+        camera = scene.camera
+        tree = getattr(scene, "compositing_node_group", None)
+        bpy.data.scenes.remove(scene)
+        if camera is not None and camera.users == 0:
+            data = camera.data
+            bpy.data.objects.remove(camera)
+            if data is not None and data.users == 0:
+                bpy.data.cameras.remove(data)
+        if tree is not None and tree.users == 0:
+            bpy.data.node_groups.remove(tree)
+
+
 def _image_node(nodes, image, label, location):
     node = nodes.new("CompositorNodeImage")
     node.image = image
@@ -104,33 +151,9 @@ def _normal_decode_node(nodes):
 
 
 def denoise_image(active_scene, image, albedo_guide=None, normal_guide=None):
-    token = uuid.uuid4().hex
-    scene = bpy.data.scenes.new(f"__PM_LM_DENOISE_{token}")
-    camera = None
-    camera_data = None
-    tree = None
-    owns_tree = False
-
+    scene, tree, owns_tree = _compositor_scene(active_scene, image.size[0], image.size[1])
     try:
-        for engine in (
-            'BLENDER_EEVEE_NEXT',
-            'BLENDER_EEVEE',
-            'BLENDER_WORKBENCH',
-        ):
-            try:
-                scene.render.engine = engine
-                break
-            except (TypeError, ValueError):
-                continue
-        scene.render.resolution_x = image.size[0]
-        scene.render.resolution_y = image.size[1]
-        scene.render.resolution_percentage = 100
         scene.render.film_transparent = True
-        _copy_compositor_settings(active_scene, scene)
-        camera, camera_data = _create_camera(scene, token)
-
-        tree, owns_tree = _compositor_tree(scene)
-        tree.nodes.clear()
         with temporary_compositor_inputs(
             image,
             albedo_guide,
@@ -254,44 +277,15 @@ def denoise_image(active_scene, image, albedo_guide=None, normal_guide=None):
             finally:
                 bpy.data.images.remove(rendered)
     finally:
-        if scene:
-            scene.camera = None
-        if camera and bpy.data.objects.get(camera.name) is camera:
-            bpy.data.objects.remove(camera, do_unlink=True)
-        if camera_data and camera_data.users == 0:
-            bpy.data.cameras.remove(camera_data)
-        if scene and bpy.data.scenes.get(scene.name) is scene:
-            bpy.data.scenes.remove(scene)
-        if (
-            owns_tree
-            and tree
-            and tree.users == 0
-            and bpy.data.node_groups.get(tree.name) is tree
-        ):
-            bpy.data.node_groups.remove(tree)
+        tree.nodes.clear()
 
 
 def denoise_external_beauty(active_scene, image, filepath):
     """Denoise an already color-managed Beauty PNG like SimpleBake."""
-    token = uuid.uuid4().hex
-    scene = bpy.data.scenes.new(f"__PMVR_BEAUTY_DENOISE_{token}")
-    camera = camera_data = tree = input_image = None
-    owns_tree = False
+    input_image = None
     staging = f"{filepath}.pmvr_denoise_tmp.png"
+    scene, tree, owns_tree = _compositor_scene(active_scene, image.size[0], image.size[1])
     try:
-        for engine in (
-            'BLENDER_EEVEE_NEXT',
-            'BLENDER_EEVEE',
-            'BLENDER_WORKBENCH',
-        ):
-            try:
-                scene.render.engine = engine
-                break
-            except (TypeError, ValueError):
-                continue
-        scene.render.resolution_x = image.size[0]
-        scene.render.resolution_y = image.size[1]
-        scene.render.resolution_percentage = 100
         scene.render.film_transparent = False
         scene.render.image_settings.file_format = 'PNG'
         scene.render.image_settings.color_mode = 'RGB'
@@ -311,10 +305,6 @@ def denoise_external_beauty(active_scene, image, filepath):
             )
         except (AttributeError, TypeError, ValueError):
             pass
-        camera, camera_data = _create_camera(scene, token)
-        tree, owns_tree = _compositor_tree(scene)
-        tree.nodes.clear()
-
         input_image = bpy.data.images.load(filepath, check_existing=False)
         noisy = _image_node(
             tree.nodes,
@@ -355,22 +345,8 @@ def denoise_external_beauty(active_scene, image, filepath):
         replace_file(staging, filepath)
         image.reload()
     finally:
+        tree.nodes.clear()
         if os.path.exists(staging):
             os.remove(staging)
         if input_image and bpy.data.images.get(input_image.name) is input_image:
             bpy.data.images.remove(input_image)
-        if scene:
-            scene.camera = None
-        if camera and bpy.data.objects.get(camera.name) is camera:
-            bpy.data.objects.remove(camera, do_unlink=True)
-        if camera_data and camera_data.users == 0:
-            bpy.data.cameras.remove(camera_data)
-        if scene and bpy.data.scenes.get(scene.name) is scene:
-            bpy.data.scenes.remove(scene)
-        if (
-            owns_tree
-            and tree
-            and tree.users == 0
-            and bpy.data.node_groups.get(tree.name) is tree
-        ):
-            bpy.data.node_groups.remove(tree)

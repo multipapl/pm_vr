@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import bpy
 
 from .bake import BakeCancelled, process_candidate
+from .compositor import release_compositor_scene
 from .log import BakeLogger
 from .progress import BakeProgressFeedback, shutdown as shutdown_feedback
 from .state import ContextState
@@ -122,6 +123,10 @@ def run_batch(context, operator=None):
 
         logger.info(f"Batch finish: {summary.message()}")
     finally:
+        try:
+            release_compositor_scene()
+        except Exception as exc:
+            print(f"[PM Lightmap] WARNING: could not remove the denoise compositor scene — {exc}")
         try:
             feedback.finish(
                 summary.message(),
