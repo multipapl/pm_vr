@@ -574,6 +574,7 @@ HELP_SECTIONS = (
         "Setup layer Queue N Units: the whole layer into the queue",
         "Esc or Cancel: stops the queue, current unit discarded",
         "A unit leaves the queue once baked for the checked states",
+        "Save During Bake (Project Settings): the file is saved between units",
         "Adding a unit that waits in the queue bakes it again",
         "Stopped queue: Save; after reopening Bake continues the rest",
         "Bake Resolution (Project Settings): size of the baked files",

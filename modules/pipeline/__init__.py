@@ -28,6 +28,12 @@ def _load_post(_filepath):
     # without a fake user; protect them before the next save drops them.
     generated.protect_all_generated_materials()
     _settle_generated_uvs()
+    # A file saved during a bake (Save During Bake) has the running flag
+    # stored; nothing runs in a file that was just opened.
+    for scene in bpy.data.scenes:
+        project = getattr(scene, "pm_vr_project", None)
+        if project is not None and project.operation_running:
+            project.operation_running = False
     restored = bake_scene.recover_interrupted_bake()
     restored += scenarios.recover_interrupted_scenarios()
     if restored:

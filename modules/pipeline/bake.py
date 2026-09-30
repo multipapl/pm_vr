@@ -72,6 +72,10 @@ def _record(project, unit, state, signature, image, status, message="", mode='BE
 GUIDE_SAMPLES = 16
 
 
+def autosave_due(last_save, minutes):
+    return minutes > 0 and time.monotonic() - last_save >= minutes * 60
+
+
 def done_flag(state):
     return "day_done" if state == 'DAY' else "evening_done"
 
@@ -885,6 +889,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         self._viewport_shading = switch_viewports_to_wireframe(context)
         _QUEUE["cancel_requested"] = False
         self._queue_started_at = time.monotonic()
+        self._last_save = time.monotonic()
         log.info(
             "Bake",
             f"Queue start: {len(project.bake_queue)} unit(s), "
@@ -1098,7 +1103,32 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         result = self._start_next_job(context)
         return result or {'RUNNING_MODAL'}
 
+    def _save_file(self, context, reason):
+        """Save During Bake (Project Settings). Called between units, when
+        nothing temporary is left in the scene but the queue's own state
+        (scenario collections, which a load restores). A failure is logged
+        and the bake goes on."""
+        if not self._project.bake_autosave_minutes or not bpy.data.filepath:
+            return
+        started = time.monotonic()
+        try:
+            bpy.ops.wm.save_mainfile()
+            log.info("Bake", f"Saved the file {reason} ({log.duration(time.monotonic() - started)})")
+        except Exception as exc:
+            log.warning("Bake", f"Could not save the file {reason}: {exc}")
+        self._last_save = time.monotonic()
+
     def _start_next_job(self, context):
+        if (
+            0 < self._job_cursor < len(self._jobs)
+            and autosave_due(self._last_save, self._project.bake_autosave_minutes)
+        ):
+            # The file keeps the user's viewport shading, not the bake's wireframe.
+            restore_viewport_shading(self._viewport_shading)
+            try:
+                self._save_file(context, "during the bake")
+            finally:
+                self._viewport_shading = switch_viewports_to_wireframe(context)
         while self._job_cursor < len(self._jobs):
             if self._cancel_requested or _QUEUE["cancel_requested"]:
                 self._request_cancel(self._cancel_reason or "Cancel button")
@@ -1261,6 +1291,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             {'WARNING'} if self._failed or cancelled or self._warned else {'INFO'},
             summary + ("; see the PMVR Pipeline Log text" if self._failed or self._warned else ""),
         )
+        self._save_file(context, "at the end of the bake")
         return (
             {'FINISHED'}
             if (self._succeeded or self._skipped) and not cancelled

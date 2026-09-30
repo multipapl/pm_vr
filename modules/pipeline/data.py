@@ -521,6 +521,17 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         ),
         default=True,
     )
+    bake_autosave_minutes: bpy.props.IntProperty(
+        name="Save During Bake",
+        description=(
+            "While a bake queue runs, save the .blend between units once this many minutes "
+            "passed since the last save, and when the queue ends: a crash costs at most this "
+            "much baking. 0: only by hand"
+        ),
+        default=15,
+        min=0,
+        soft_max=240,
+    )
     beauty_denoise: bpy.props.EnumProperty(
         name="Denoise",
         description="How a Beauty bake is denoised",
