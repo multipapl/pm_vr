@@ -35,6 +35,8 @@ default panorama is 1024×512, RGB Half ZIP EXR. A JPEG from the same render is
 saved locally in `PMVR/ProbePreviews`; only EXRs belong in Sync. Assign probe
 cameras to Runtime so export includes their Empty representations. The
 authoring cameras remain unchanged.
+Probe Empties export at the root with world positions, so rotated/scaled
+parents and nested camera rigs cannot affect their orientation or leak cameras.
 The `?` button next to it lists the naming and scene rules the pipeline relies on.
 New projects create `PMVR/Bakes`, `Flattened`, `Logs` and `ProbePreviews` beside
 the saved `.blend` during Initialize (or its first save). Existing projects keep
@@ -241,3 +243,18 @@ The complete design and implementation contract is in
 ## Installation
 
 Install or link this directory as the `PM_VR` Blender addon, then enable **PM VR** in Blender preferences. The tools appear in **View3D > N-Panel > PM VR**.
+
+For the isolated v3 preview, launch **D:\Blender_Python_v3\Blender_v3.bat**.
+It uses a separate configuration with the owner's OptiX and addons. The normal
+Blender uses production v2. Artist acceptance and a v3 release tag remain
+pending; changes are on branch `v3` only.
+
+The **?** button has Artist Rules, Runtime Names and After Bake tabs. See
+[`docs/ARTIST_RULES.md`](docs/ARTIST_RULES.md) for the same preparation and
+change rules. Runtime Zone/Navmesh/Collision meshes are invisible to bake/probe
+renders, restored afterwards, and retained in Runtime export.
+
+Run `run_tests.bat` for background regressions; `gui` adds interactive cases,
+and `gui-only` runs those cases alone. Detailed logs are kept under
+`%TEMP%/pmvr_test_logs`. Use a private Blender configuration and temp directory
+for verification.

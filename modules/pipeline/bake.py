@@ -5,7 +5,7 @@ import time
 import uuid
 
 import bpy
-from . import looks
+from . import looks, platform
 
 from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image, release_compositor_scene
 from ..lightmap_baker.images import create_float_image, remove_image
@@ -182,6 +182,7 @@ class BeautyBakeRuntime:
         self.snapshot = EvaluationSnapshot(self.context)
         self.context_state = ContextState(self.context)
         self.snapshot.isolate_source_root(self.project)
+        platform.hide_runtime_helpers(self.snapshot, self.project)
         for source in self.members:
             self.snapshot.hide(source)
         self.context.scene.cycles.samples = self.project.cycles_samples
@@ -613,6 +614,7 @@ def bake_lightmap_unit(context, unit, operator=None):
     created_materials = []
     try:
         snapshot.isolate_source_root(project)
+        platform.hide_runtime_helpers(snapshot, project)
         for source in members:
             snapshot.hide(source)
         context.scene.cycles.samples = project.cycles_samples

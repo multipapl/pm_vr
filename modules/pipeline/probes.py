@@ -1,5 +1,4 @@
-"""Reflection probes: a panorama from every panoramic camera of the Runtime
-layers, one EXR per camera and lighting state, lit like the bake."""
+"""World-aligned reflection probes from configured cameras in every look."""
 
 import math
 import os
@@ -7,7 +6,7 @@ import time
 import uuid
 
 import bpy
-from . import looks
+from . import looks, platform
 from mathutils import Matrix
 
 from ..lightmap_baker.progress import BakeProgressFeedback
@@ -173,6 +172,7 @@ class ProbeSession:
             self.display = view.render_display_type
             view.render_display_type = 'NONE'
         self.evaluation.isolate_source_root(self.project)
+        platform.hide_runtime_helpers(self.evaluation, self.project)
         self.work = pipeline_collection(WORK_COLLECTION)
         ensure_scene_collection(self.scene, self.work)
 

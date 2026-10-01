@@ -2,6 +2,10 @@
 
 ## v3 development
 
+- Help has Artist Rules, Runtime Names and After Bake tabs, with a matching artist guide in docs.
+- Data-only Runtime Zone/Navmesh/Collision meshes do not shade Beauty/Lightmap/probe renders; original visibility and export membership are preserved.
+- Probe Empties export at world positions without camera ancestry; rotated/non-uniformly scaled parents preserve positions in USDZ and GLB.
+- Test runner supports gui-only and keeps a separate log for each case.
 - Optional PBR Diffuse Only bake (default off) excludes receiver highlights and emission, preserving original exported PBR channels and all compatibility signatures.
 - Probe cameras come from a configured collection, including nested cameras of any type; legacy Probes is selected automatically.
 - Render Probes covers every lighting look, writes world-aligned RGB Half ZIP EXRs and local JPEG previews from the same render.

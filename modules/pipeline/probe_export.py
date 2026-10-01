@@ -27,8 +27,11 @@ def representations(context, project, objects):
                 if key in {'pm_vr_pipeline', '_RNA_UI'}:
                     continue
                 proxy[key] = value.to_dict() if hasattr(value, 'to_dict') else value
-            proxy.parent = obj.parent
-            proxy.matrix_world = Matrix.Translation(position)
+            # A probe is a world position, not a camera rig. Export at the
+            # root: USD/glTF TRS decomposition otherwise loses the inverse
+            # shear of rotated, non-uniformly scaled parents, and camera
+            # ancestry can leak extra Camera entities into the package.
+            proxy.matrix_basis = Matrix.Translation(position)
             replacements.append((obj, original_name))
             obj.name = '__PMVR_PROBE_SOURCE_' + uuid.uuid4().hex
             proxy.name = original_name

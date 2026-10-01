@@ -18,6 +18,8 @@ parser.add_argument('--source-root', required=True)
 parser.add_argument('--report-root', required=True)
 parser.add_argument('--unit')
 parser.add_argument('--gpu', action='store_true')
+parser.add_argument('--samples', type=int, default=8)
+parser.add_argument('--denoise', choices=('OFF', 'GUIDED', 'IMAGE'), default='OFF')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
 copy, root, source, output = (Path(v).resolve() for v in (args.copy, args.test_root, args.source_root, args.report_root))
 assert copy.is_relative_to(root) and output.is_relative_to(root) and not copy.is_relative_to(source)
@@ -82,8 +84,8 @@ else:
         assert any(device.use and device.type == 'OPTIX' for device in prefs.devices)
     scene.cycles.use_adaptive_sampling = False
     scene.cycles.seed = 29
-    project.cycles_samples, project.bake_resolution = 8, '512'
-    project.beauty_denoise, project.fill_empty_uv = 'OFF', False
+    project.cycles_samples, project.bake_resolution = args.samples, '512'
+    project.beauty_denoise, project.fill_empty_uv = args.denoise, False
     # Neither branch overwrites the snapshot's valid reference atlases.
     activate_state(bpy.context, 'DAY')
     products = []
@@ -141,7 +143,8 @@ else:
     for item in products:
         del item['pixels']
     report = {'copy': str(copy), 'original_opened': False, 'audited_paths': len(paths),
-              'unit': unit.display_name, 'members': [obj.name for obj in members], 'samples': 8,
+              'unit': unit.display_name, 'members': [obj.name for obj in members], 'samples': args.samples,
+              'denoise': args.denoise,
               'resolution': before['resolution'], 'device': scene.cycles.device, 'products': products,
               'mean_linear_rgb_delta': float(delta), 'changed_packaged_media': changed,
               'authored_usd_equal': True, 'original_pbr_channels_preserved': True,

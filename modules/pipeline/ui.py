@@ -535,7 +535,7 @@ HELP_SECTIONS = (
         "Object, mesh, material names: anything (identity uses IDs)",
         "Renaming after a bake is safe",
         "UV channels: 1st UVMap, 2nd SimpleBake",
-        "Layer name = export file: Name.usdz, Name_Evening.usdz",
+        "Layer name = export file: Name.usdz, Name_<Look>.usdz",
         "Layer names must differ (case-insensitive)",
         "Unit name = Beauty PNG name; clashes get an ID suffix",
         "Generated object = source name + .001, used in export",
@@ -573,7 +573,7 @@ HELP_SECTIONS = (
         "Denoise Image Only (SimpleBake): smears noisy areas flat",
         "Alpha: opacity from Principled Alpha or a Transparent mix",
         "Alpha opacity may come through a node group input",
-        "Lighting Day/Evening (top): shows that state's bake",
+        "Lighting (top): shows the selected look's bake",
         "A lighting state switches on with all its nested collections",
         "Modifiers must not add or remove material slots",
         "Setup layer Queue N Units: the whole layer into the queue",
@@ -594,7 +594,7 @@ HELP_SECTIONS = (
         "+ saves the outliner as it is; Capture Outliner updates it",
         "Layer sets the default; a unit can override it",
         "Checked units change scenario together",
-        "Day/Evening collections follow the Lighting switch",
+        "Every look's collections follow the Lighting switch",
         "Disabling a collection disables everything inside it",
         "New collections join every scenario as they are in the outliner",
         "Outliner is restored after the queue, cancel or a crash",
@@ -604,18 +604,20 @@ HELP_SECTIONS = (
         "Every unit needs a Ready Beauty for the active state",
         "Atlases scale to unit resolution (linear light, colour kept)",
         "Variants: USDZ/Variants/<Object>_<Variant>.usdz, swatch, JSON",
-        "Day and Evening must have matching structure",
+        "Lighting looks must have matching structure",
         "Additional exports: same layer type only",
         "Selection and visibility are ignored: all assigned objects export",
-        "Only inside Evening lighting collection: Evening export only",
+        "Inside a look's lighting collection: that look's export only",
         "USD: st = baked atlas (SimpleBake), UVMap = authored layout",
         "Each USDZ is checked after writing; problems count as failed",
     )),
     ("Probes", 'WORLD', (
-        "Probe: panoramic equirectangular camera in a Runtime layer",
-        "Render Probes (Bake): one EXR per camera and checked state",
-        "File: the camera's USD name, _Evening for Evening",
-        "EXR Half ZIP (Apple cannot read DWAA)",
+        "Probe: any camera in configured collection, nested cameras included",
+        "Assign probe cameras to Runtime; they export as Empty positions",
+        "Render Probes: every camera, every look (Bake checks ignored)",
+        "File: camera USD name, _<Look> for non-default looks",
+        "1024x512 default; EXR Half RGB ZIP (no DWAA)",
+        "Same render -> local JPEG in PMVR/ProbePreviews, outside Sync",
         "Lit like the bake: generated results hidden, state lighting on",
         "Denoised by Cycles (OIDN, albedo + normal); compositor off",
         "World-aligned (+Y ahead, Z up): camera rotation is ignored",
@@ -628,10 +630,33 @@ class PMVR_OT_ShowHelp(bpy.types.Operator):
     bl_idname = "pmvr.show_help"
     bl_label = "PM VR Rules"
     bl_description = "Naming and scene rules the pipeline relies on"
+    help_tab: bpy.props.EnumProperty(items=(
+        ('RULES', 'Artist Rules', 'Scene preparation and pipeline rules'),
+        ('RUNTIME', 'Runtime Names', 'Platform object names and roles'),
+        ('AFTER', 'After Bake', 'Changes that require a rebake or re-export'),
+    ), default='RULES')
+    rule_section: bpy.props.EnumProperty(items=tuple(
+        (title, title, 'Show ' + title.lower() + ' rules') for title, _icon, _lines in HELP_SECTIONS
+    ), default='Scene')
 
     def draw(self, _context):
         layout = self.layout
-        for title, icon, lines in HELP_SECTIONS:
+        layout.prop(self, 'help_tab', expand=True)
+        if self.help_tab == 'RUNTIME':
+            from .artist_rules import RUNTIME_NAMES
+            column = layout.column(align=True)
+            for title, explanation in RUNTIME_NAMES:
+                column.label(text=title, icon='INFO')
+                column.label(text='    ' + explanation)
+            layout.label(text='Unknown names warn; objects are never renamed or removed.')
+            return
+        if self.help_tab == 'AFTER':
+            from .artist_rules import AFTER_BAKE
+            sections = [(title, 'INFO', lines) for title, lines in AFTER_BAKE]
+        else:
+            layout.prop(self, 'rule_section', text='Topic')
+            sections = [section for section in HELP_SECTIONS if section[0] == self.rule_section]
+        for title, icon, lines in sections:
             box = layout.box()
             box.label(text=title, icon=icon)
             column = box.column(align=True)
@@ -639,7 +664,7 @@ class PMVR_OT_ShowHelp(bpy.types.Operator):
                 column.label(text=f"•  {line}")
 
     def invoke(self, context, _event):
-        return context.window_manager.invoke_popup(self, width=440)
+        return context.window_manager.invoke_popup(self, width=620)
 
     def execute(self, _context):
         return {'FINISHED'}

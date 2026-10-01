@@ -11,6 +11,26 @@ EMPTY_ROLES = ('Hotspot', 'InfoButton', 'InfoPanel', 'SFX', 'Ambience', 'Music',
 MESH_ROLES = ('Zone', 'Video', 'Clock')
 
 
+def hide_runtime_helpers(snapshot, project):
+    """Data-only Runtime geometry must never shadow a bake or probe render.
+
+    Uses the existing visibility snapshot, including interrupted-run recovery;
+    restores authored visibility and leaves export membership untouched.
+    """
+    layers = {layer.layer_id for layer in project.render_layers if layer.layer_type == 'RUNTIME'}
+    root = project.source_root_collection
+    # Changing render visibility may invalidate Blender's collection cache.
+    # Materialize first; complex linked scenes can also expose null entries.
+    objects = tuple(root.all_objects) if root else ()
+    for obj in objects:
+        if obj is None:
+            continue
+        meta = obj.pm_vr_pipeline
+        if (obj.type == 'MESH' and meta.is_registered_source and meta.render_layer_id in layers
+                and obj.name.startswith(('Zone_', 'Navmesh', 'Collision'))):
+            snapshot.hide(obj)
+
+
 @contextmanager
 def authored_properties(objects):
     """Latest source properties on generated export objects, with full rollback.
