@@ -2,6 +2,10 @@
 
 ## v3 development
 
+- USDZ exports write atomic per-look descriptions, retaining other current files during partial exports and removing stale layer entries.
+- Export uses current source object properties, including Glass opacity, without rebaking or changing stored generated objects.
+- Material variant groups have an optional display title; IDs and filenames stay stable.
+- Runtime naming validation reports warnings without renaming objects or blocking export.
 - Logs identify the addon commit, including isolated Git worktrees.
 - The GUI test runner now runs the autosave and Image Editor tests that had invalid paths.
 - Tests and an isolated reference export tool are tracked in Git.

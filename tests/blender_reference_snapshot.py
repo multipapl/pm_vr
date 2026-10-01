@@ -19,9 +19,14 @@ parser.add_argument('--source-root', required=True)
 parser.add_argument('--copy', required=True)
 parser.add_argument('--test-root', required=True)
 parser.add_argument('--export', action='store_true')
+parser.add_argument('--sync-name', default='Sync_v2')
+parser.add_argument('--isolated-name', default='Uniplace_v2_reference_isolated.blend')
 args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
 source = Path(args.source_root).resolve()
 root = Path(args.test_root).resolve()
+sync = (root / args.sync_name).resolve()
+isolated = (root / args.isolated_name).resolve()
+assert sync.is_relative_to(root) and isolated.is_relative_to(root)
 copy = Path(args.copy).resolve()
 assert copy.is_relative_to(root) and not copy.is_relative_to(source), copy
 sys.path.insert(0, args.addon_parent)
@@ -37,7 +42,7 @@ def remap(value):
     path = Path(bpy.path.abspath(value, start=str(source))).resolve()
     for folder, destination in (('Beauty_Bakes', root / 'Beauty_Bakes'),
                                 ('PMVR_Flattened', root / 'PMVR_Flattened'),
-                                ('UniPlace_Sync', root / 'Sync_v2')):
+                                ('UniPlace_Sync', sync)):
         old = source / folder
         if path.is_relative_to(old):
             result = destination / path.relative_to(old)
@@ -63,9 +68,9 @@ for scene in bpy.data.scenes:
     project = scene.pm_vr_project
     for field, folder in (('beauty_output_directory', 'Beauty_Bakes'),
                           ('lightmap_output_directory', 'Lightmaps'),
-                          ('usdz_output_directory', 'Sync_v2/USD'),
-                          ('glb_output_directory', 'Sync_v2/GLB'),
-                          ('probe_output_directory', 'Sync_v2/probes')):
+                          ('usdz_output_directory', args.sync_name + '/USD'),
+                          ('glb_output_directory', args.sync_name + '/GLB'),
+                          ('probe_output_directory', args.sync_name + '/probes')):
         destination = root / folder
         destination.mkdir(parents=True, exist_ok=True)
         setattr(project, field, str(destination) + os.sep)
@@ -105,13 +110,12 @@ def audit():
     return len(paths)
 
 path_count = audit()
-isolated = root / 'Uniplace_v2_reference_isolated.blend'
 assert bpy.ops.wm.save_as_mainfile(filepath=str(isolated), relative_remap=False) == {'FINISHED'}
 assert audit() == path_count
 report = {'source_opened': False, 'isolated_blend': str(isolated),
           'addon_version': list(PM_VR.bl_info['version']), 'audited_paths': path_count,
           'remapped_paths': changed, 'export': []}
-(root / 'reference_isolation.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+(root / (args.sync_name + '_isolation.json')).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
 print('PMVR_REFERENCE_ISOLATION_OK', path_count, flush=True)
 
 if args.export:
@@ -136,13 +140,13 @@ if args.export:
             textures.cleanup()
         export.write_variant_manifest(project)
     files = {}
-    for path in sorted((root / 'Sync_v2').rglob('*')):
+    for path in sorted(sync.rglob('*')):
         if path.is_file() and (path.suffix.lower() in ('.usdz', '.json')):
-            files[str(path.relative_to(root / 'Sync_v2'))] = {
+            files[str(path.relative_to(sync))] = {
                 'bytes': path.stat().st_size,
                 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     report['files'] = files
-    (root / 'reference_export.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    (root / (args.sync_name + '_export.json')).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     failures = [item for item in report['export'] if item['status'] == 'FAILED']
     assert not failures, failures
     assert files, 'No reference files written'

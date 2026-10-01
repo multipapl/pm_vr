@@ -264,6 +264,7 @@ def draw_variants(layout, project, unit):
         row.alert = True
         row.label(text=problem[:1].upper() + problem[1:], icon='ERROR')
     box.prop(unit, "variant_material")
+    box.prop(unit, "variant_group_title")
     box.prop(unit, "variant_default_title")
     for index, variant in enumerate(unit.variants):
         row = box.row(align=True)

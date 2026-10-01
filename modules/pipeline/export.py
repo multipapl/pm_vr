@@ -19,7 +19,7 @@ from .generated import (
     use_bake_uv,
 )
 from .identity import duplicate_source_ids, export_layer_members, find_layer, find_unit, safe_stem, unit_members
-from . import export_colours, log, usd_check, variants
+from . import export_colours, export_description, log, platform, usd_check, variants
 from .setup_ops import baked_resolution
 from .state import activate_state
 
@@ -262,7 +262,7 @@ def _variant_marker(unit):
             holder.name = variants.MARKER_NAME
 
 
-def _export_variants(context, project, layer, state, textures):
+def _export_variants(context, project, layer, state, textures, written_paths=None):
     """Variants/<Object>_<Variant>[_Evening].usdz for the layer's units with
     variants: the generated object itself (so its name is the scene's) with
     the variant's baked colour. Swatches are made by hand and placed in
@@ -313,6 +313,8 @@ def _export_variants(context, project, layer, state, textures):
                 with _variant_marker(unit) as marker:
                     _write_usdz(context, project, layer, [generated, *marker], final_path, textures)
                 written += 1
+                if written_paths is not None:
+                    written_paths.append(final_path)
             finally:
                 for slot, material in enumerate(bound):
                     generated.data.materials[slot] = material
@@ -359,14 +361,14 @@ def _write_usdz(context, project, layer, objects, final_path, textures):
     try:
         for obj in render_disabled:
             obj.hide_render = False
-        with textures.scaled(project, objects), export_colours.explicit_colours(
+        with platform.authored_properties(objects), textures.scaled(project, objects), export_colours.explicit_colours(
             context, objects, os.path.basename(final_path)
         ):
             result = collection_export.export_usdz(assembly, temporary_path)
         if 'FINISHED' not in result or not os.path.exists(temporary_path):
             raise PipelineExportError(f"Blender did not produce {os.path.basename(final_path)}")
+        _check_written(temporary_path)
         os.replace(temporary_path, final_path)
-        _check_written(final_path)
     finally:
         for obj in render_disabled:
             obj.hide_render = True
@@ -409,7 +411,12 @@ def export_semantic_layer(context, layer, format_name, textures=None):
     try:
         objects = resolve_layer_objects(context, layer)
         if not objects:
+            if format_name == 'USDZ':
+                export_description.write(project, project.active_lighting_state, excluded=(layer.layer_id,))
             return "SKIPPED", "no objects for the active state"
+        if layer.layer_type == 'RUNTIME':
+            for name, problem in platform.runtime_warnings(objects):
+                log.warning('Export', f'{name}: {problem}')
         _settle_uvs(objects, f"{layer.display_name} ({format_name})")
         final_path = _export_path(project, layer, project.active_lighting_state, format_name)
         folder, temporary_path = _temporary_export_path(final_path)
@@ -421,7 +428,7 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         try:
             for obj in render_disabled:
                 obj.hide_render = False
-            with textures.scaled(project, objects), export_colours.explicit_colours(
+            with platform.authored_properties(objects), textures.scaled(project, objects), export_colours.explicit_colours(
                 context, objects, f"{layer.display_name} ({format_name})"
             ):
                 result = exporter(assembly, temporary_path)
@@ -432,18 +439,21 @@ def export_semantic_layer(context, layer, format_name, textures=None):
             raise PipelineExportCancelled(f"{format_name} export was cancelled")
         if 'FINISHED' not in result or not os.path.exists(temporary_path):
             raise PipelineExportError(f"Blender did not produce {format_name}")
+        if format_name == 'USDZ':
+            _check_written(temporary_path)
         os.replace(temporary_path, final_path)
         log.info("Export", f"{layer.display_name} ({format_name}): {len(objects)} object(s) -> {final_path}")
-        if format_name == 'USDZ':
-            _check_written(final_path)
+        committed = [final_path]
         if format_name == 'USDZ' and layer.layer_type == 'UNLIT':
             written, problems = _export_variants(
-                context, project, layer, project.active_lighting_state, textures
+                context, project, layer, project.active_lighting_state, textures, written_paths=committed
             )
             if written:
                 log.info("Export", f"{layer.display_name}: {written} variant file(s) in {variants.FOLDER}/")
             for problem in problems:
                 log.warning("Export", f"Variant not exported: {problem}")
+        if format_name == 'USDZ':
+            export_description.write(project, project.active_lighting_state, committed)
         return "SUCCESS", final_path
     finally:
         _remove_assembly(context.scene, assembly)
@@ -559,6 +569,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             manifest = write_variant_manifest(project)
             if manifest:
                 log.info("Export", f"Material variants: {manifest[1]} object(s) -> {manifest[0]}")
+            export_description.write(project, project.active_lighting_state)
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"

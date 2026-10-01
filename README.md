@@ -3,6 +3,17 @@
 A production pipeline addon for preparing, baking, previewing, and exporting
 Apple Vision Pro scenes from Blender 5.2.
 
+The isolated v3 branch writes `PMVR_Export_<Look>.json` beside USDZ packages.
+The description lists the current exported layers and variants, including files
+retained from earlier partial exports. Deleted or renamed layers disappear from
+the list. Asset Manager reads this list and ignores unlisted old packages.
+Export reads `title`, `order`, `volume`, `opacity`, `brightness` and
+`emissiveIntensity` from source objects at export time; changing these values
+does not require a rebake. Glass uses authored opacity. Scene custom property
+`reflectionIntensity` goes into the description. Variant groups can have a
+display title without changing their stable IDs or package names. Runtime
+naming checks report warnings and leave scene names untouched.
+
 The View3D sidebar is organized as four stages:
 
 1. **Optimize** — the existing manual audit, naming, UV, texel-density, relink,

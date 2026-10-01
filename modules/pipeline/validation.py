@@ -184,6 +184,10 @@ def validate_all(context):
     root_objects = set(project.source_root_collection.all_objects) if project.source_root_collection else set()
     output_names = {}
     for layer in project.render_layers:
+        if layer.layer_type == 'RUNTIME':
+            from .platform import runtime_warnings
+            for name, message in runtime_warnings(layer_members(layer.layer_id)):
+                issues.append(Issue('WARNING', message, name))
         if not layer.layer_id:
             issues.append(Issue('ERROR', f'Layer "{layer.display_name}" has no stable ID'))
         if not layer.display_name.strip():

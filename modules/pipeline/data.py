@@ -348,6 +348,9 @@ class PMVR_BakeUnit(bpy.types.PropertyGroup):
     day_baked_resolution: bpy.props.IntProperty(name="Day Baked Resolution", default=0, options={'HIDDEN'})
     evening_baked_resolution: bpy.props.IntProperty(name="Evening Baked Resolution", default=0, options={'HIDDEN'})
     variants: bpy.props.CollectionProperty(type=PMVR_BakeVariant)
+    variant_group_title: bpy.props.StringProperty(
+        name="Group Title", description="Name shown above the material variants; empty uses the unit name",
+    )
     variant_material: bpy.props.PointerProperty(
         name="Changes",
         type=bpy.types.Material,

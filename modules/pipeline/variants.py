@@ -134,7 +134,8 @@ def manifest_entry(unit, entity, staging):
         options.append({"id": option_id, "title": variant.title.strip(), "model": model})
     if len(options) < 2:
         return None
-    return {"id": _slug(unit.display_name), "title": unit.display_name, "entity": entity, "options": options}
+    return {"id": _slug(unit.display_name), "title": unit.variant_group_title.strip() or unit.display_name,
+            "entity": entity, "options": options}
 
 
 def write_manifest(staging, entries):
