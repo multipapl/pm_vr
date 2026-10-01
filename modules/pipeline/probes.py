@@ -4,6 +4,7 @@ layers, one EXR per camera and lighting state, lit like the bake."""
 import math
 import os
 import time
+import uuid
 
 import bpy
 from . import looks
@@ -14,15 +15,38 @@ from .bake_scene import EvaluationSnapshot, ensure_scene_collection, pipeline_co
 from .constants import WORK_COLLECTION
 from .export import other_state_objects
 from .identity import export_layer_members
-from .state import activate_state
+from .state import activate_state, collection_contains
 from .variants import usd_name
 from . import bake, log
+
+
+def migrate(project):
+    if project.probe_collection_version == 0 and project.initialized:
+        collection = bpy.data.collections.get('Probes')
+        if (project.legacy_working_directory and not project.probe_collection and collection
+                and project.source_root_collection and collection_contains(project.source_root_collection, collection)):
+            project.probe_collection = collection
+        project.probe_collection_version = 1
+
+
+def runtime_warnings(project):
+    if not project.probe_collection:
+        return []
+    runtime = {obj.as_pointer() for layer in project.render_layers if layer.layer_type == 'RUNTIME'
+               for obj in export_layer_members(layer.layer_id)}
+    return [(obj.name, 'Probe camera is not assigned to a Runtime layer')
+            for obj in project.probe_collection.all_objects
+            if obj.type == 'CAMERA' and obj.as_pointer() not in runtime]
 
 
 def probe_cameras(project, state):
     """Equirectangular cameras assigned to Runtime layers, by name. Cameras
     that live only in the other state's lighting collection are left out,
     as in export."""
+    migrate(project)
+    if project.probe_collection:
+        return sorted((obj for obj in project.probe_collection.all_objects if obj.type == 'CAMERA'),
+                      key=lambda obj: obj.name.casefold())
     skipped = other_state_objects(project, state)
     cameras = {}
     for layer in project.render_layers:
@@ -40,7 +64,8 @@ def probe_cameras(project, state):
 
 
 def probe_states(project):
-    return looks.checked(project)
+    looks.ensure(project)
+    return [look.look_id for look in project.lighting_looks]
 
 
 def probe_directory(project):
@@ -54,6 +79,24 @@ def probe_path(project, camera, state):
     # Named like the camera's prim in the Runtime USDZ: the app pairs them by name.
     suffix = looks.suffix(project, state)
     return os.path.join(probe_directory(project), f"{usd_name(camera.name)}{suffix}.exr")
+
+
+def preview_path(project, exr_path):
+    return os.path.join(bpy.path.abspath(project.probe_preview_directory),
+                        os.path.splitext(os.path.basename(exr_path))[0] + '.jpg')
+
+
+def _atomic_render(result, path, scene):
+    folder, filename = os.path.split(path)
+    os.makedirs(folder, exist_ok=True)
+    stem, extension = os.path.splitext(filename)
+    staged = os.path.join(folder, f'.{stem}.pmvr_tmp_{uuid.uuid4().hex[:12]}{extension}')
+    try:
+        result.save_render(staged, scene=scene)
+        os.replace(staged, path)
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
 
 
 def _render_result():
@@ -138,10 +181,11 @@ class ProbeSession:
             activate_state(self.context, state)
             self.state = state
         if self.probe is None:
-            self.probe = bpy.data.objects.new("__PMVR_PROBE_CAMERA", camera.data)
+            data = bpy.data.cameras.new('__PMVR_PROBE_CAMERA')
+            data.type = 'PANO'
+            data.panorama_type = 'EQUIRECTANGULAR'
+            self.probe = bpy.data.objects.new("__PMVR_PROBE_CAMERA", data)
             self.work.objects.link(self.probe)
-        else:
-            self.probe.data = camera.data
         self.probe.matrix_world = (
             Matrix.Translation(camera.matrix_world.translation)
             @ Matrix.Rotation(math.radians(90.0), 4, 'X')
@@ -152,11 +196,18 @@ class ProbeSession:
         result = _render_result()
         if not result:
             raise RuntimeError("no render result")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        # Written beside the final name, so a synced folder never sees half a file.
-        staged = f"{path[:-4]}.pmvr_tmp.exr"
-        result.save_render(staged, scene=self.scene)
-        os.replace(staged, path)
+        _atomic_render(result, path, self.scene)
+        settings = self.scene.render.image_settings
+        original = {name: getattr(settings, name) for name in (*self.IMAGE, 'quality') if hasattr(settings, name)}
+        try:
+            settings.file_format, settings.color_mode, settings.color_depth = 'JPEG', 'RGB', '8'
+            settings.quality = 90
+            _atomic_render(result, preview_path(self.project, path), self.scene)
+        except Exception as exc:
+            log.warning('Probes', f'EXR saved; local JPEG preview could not be written: {exc}')
+        finally:
+            for name, value in original.items():
+                setattr(settings, name, value)
 
     def end(self):
         steps = (
@@ -173,7 +224,10 @@ class ProbeSession:
 
     def _remove_camera(self):
         if self.probe is not None:
+            data = self.probe.data
             bpy.data.objects.remove(self.probe)
+            if data.users == 0:
+                bpy.data.cameras.remove(data)
             self.probe = None
         remove_work_collection(self.work)
         self.work = None
@@ -240,8 +294,8 @@ class PMVR_OT_RenderProbes(bpy.types.Operator):
     bl_idname = "pmvr.render_probes"
     bl_label = "Render Probes"
     bl_description = (
-        "Render an EXR panorama at every panoramic camera of the Runtime layers "
-        "for the checked Day/Evening states, lit like the bake and world-aligned. "
+        "Render world-aligned EXR panoramas from the probe camera collection "
+        "for all project lighting looks, with local JPEG previews. "
         "Esc cancels; finished probes are kept"
     )
 
@@ -255,9 +309,12 @@ class PMVR_OT_RenderProbes(bpy.types.Operator):
         if not states:
             self.report({'ERROR'}, "Choose Day, Evening, or both")
             return {'CANCELLED'}
-        if not bpy.data.filepath and (project.probe_output_directory or project.usdz_output_directory).startswith("//"):
+        if not bpy.data.filepath and any(value.startswith('//') for value in
+                (project.probe_output_directory or project.usdz_output_directory, project.probe_preview_directory)):
             self.report({'ERROR'}, "Save the .blend file before using a relative probe folder")
             return {'CANCELLED'}
+        for name, problem in runtime_warnings(project):
+            log.warning('Probes', f'{name}: {problem}')
         self._jobs = [(state, camera.name) for state in states for camera in probe_cameras(project, state)]
         if not self._jobs:
             self.report({'ERROR'}, "No panoramic (equirectangular) camera in a Runtime layer")
@@ -325,10 +382,10 @@ class PMVR_OT_RenderProbes(bpy.types.Operator):
         self._cursor += 1
         self._project.operation_progress = (self._cursor - 1) / len(self._jobs)
         camera = bpy.data.objects.get(name)
-        self._feedback.begin_object(f"{state.title()} — {name}", self._cursor, len(self._jobs))
+        self._feedback.begin_object(f"{looks.name(self._project, state)} — {name}", self._cursor, len(self._jobs))
         if not camera or camera.type != 'CAMERA':
             self._failed += 1
-            log.error("Probes", f'"{name}" disappeared before its {state.title()} render')
+            log.error("Probes", f'"{name}" disappeared before its {looks.name(self._project, state)} render')
             return None
         self._session.aim(camera, state)
         self._started_at = time.monotonic()
@@ -341,13 +398,13 @@ class PMVR_OT_RenderProbes(bpy.types.Operator):
             self._session.save(path)
         except Exception as exc:
             self._failed += 1
-            log.error("Probes", f'{state.title()} probe "{camera.name}" not saved: {exc}', with_traceback=True)
+            log.error("Probes", f'{looks.name(self._project, state)} probe "{camera.name}" not saved: {exc}', with_traceback=True)
             return
         self._succeeded += 1
         self._feedback.complete_object()
         log.info(
             "Probes",
-            f'Rendered {state.title()} probe "{camera.name}" '
+            f'Rendered {looks.name(self._project, state)} probe "{camera.name}" '
             f"({log.duration(time.monotonic() - self._started_at)}) -> {path}",
         )
 
@@ -428,7 +485,7 @@ class PMVR_OT_RenderProbes(bpy.types.Operator):
         bake._QUEUE["cancel_requested"] = False
         self._project.operation_running = False
         self._project.operation_progress = 1.0
-        states = " + ".join(state.title() for state in self._states)
+        states = " + ".join(looks.name(self._project, state) for state in self._states)
         summary = f"Probes ({states}): {self._succeeded} ready, {self._failed} failed"
         if cancelled:
             summary += f", cancelled ({self._cancel_reason or 'error'})"

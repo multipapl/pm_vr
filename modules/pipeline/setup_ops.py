@@ -1233,6 +1233,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         export.prop(project, "glb_output_directory")
         probes = layout.box()
         probes.label(text="Probes", icon='WORLD')
+        probes.prop(project, 'probe_collection')
         probes.prop(project, "probe_output_directory")
         probes.prop(project, "probe_preview_directory")
         probes.prop(project, "probe_width")

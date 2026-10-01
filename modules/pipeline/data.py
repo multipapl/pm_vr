@@ -598,6 +598,8 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         default="",
         options={'PATH_SUPPORTS_BLEND_RELATIVE'},
     )
+    probe_collection: bpy.props.PointerProperty(name='Probe Cameras', type=bpy.types.Collection)
+    probe_collection_version: bpy.props.IntProperty(default=0, options={'HIDDEN'})
     probe_width: bpy.props.EnumProperty(
         name="Probe Size",
         description="Width of a probe panorama; the height is half of it",

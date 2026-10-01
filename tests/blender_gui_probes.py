@@ -10,7 +10,7 @@ A simulated Esc never reaches a render job (Blender stops renders on the
 real key), so esc presses the real key, and only while the test's own
 window is in front; otherwise it fails instead of typing into another window.
 
-Three probe cameras, Day only. finish: three EXRs. esc: Esc while the
+Three probe cameras, every look. finish: six EXRs. esc: Esc while the
 first probe renders; nothing is written and the run stops. button: Cancel
 while the second renders; it finishes and is kept, the third is not
 rendered. Always: no render window opens, the Render display preference,
@@ -51,11 +51,13 @@ def setup():
     scene.cycles.use_denoising = False
     # Long enough renders to cancel one in the middle.
     scene.cycles.use_adaptive_sampling = False
+    scene.render.threads_mode = 'FIXED'
+    scene.render.threads = 2
     project = scene.pm_vr_project
     project.initialized = True
     project.project_id = new_id()
-    project.cycles_samples = 8 if MODE == "finish" else 2048
-    project.probe_width = '512' if MODE == "finish" else '1024'
+    project.cycles_samples = 8 if MODE == "finish" else 256
+    project.probe_width = '512'
     output = tempfile.mkdtemp(prefix="pmvr_gui_probes_")
     project.usdz_output_directory = os.path.join(output, "USDZ") + os.sep
     root = bpy.data.collections.new("Root")
@@ -112,10 +114,55 @@ def press_real_esc():
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
     if pid.value != os.getpid():
-        return False
+        # An unattended run may initially hide its owned window. The real
+        # keyboard check is restricted to that process and its GHOST window.
+        handles = []
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        @callback_type
+        def visit(handle, _param):
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(handle, ctypes.byref(owner))
+            if owner.value == os.getpid():
+                name = ctypes.create_unicode_buffer(128)
+                user32.GetClassNameW(handle, name, len(name))
+                if name.value.startswith('GHOST_'):
+                    handles.append(handle)
+            return True
+        user32.EnumWindows(visit, 0)
+        print('PROBE_ESC_OWN_WINDOWS', handles, 'foreground PID', pid.value, flush=True)
+        if not handles:
+            return False
+        # Render cancellation polls actual keyboard state, so posted messages
+        # cannot exercise it. A native-key test needs its own interactive
+        # window. Show only the HWND whose PID was checked above.
+        handle = handles[0]
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.ShowWindow(handle, 9)
+        user32.SetForegroundWindow(handle)
+        # Windows may deny a timer callback foreground activation. Attach
+        # this test thread briefly to the foreground input queue, activate
+        # ONLY the verified owned window, then detach before sending keys.
+        foreground_thread = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+        current_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+        user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        if foreground_thread != current_thread:
+            attached = user32.AttachThreadInput(current_thread, foreground_thread, True)
+            try:
+                if attached:
+                    user32.SetForegroundWindow(handle)
+            finally:
+                if attached:
+                    user32.AttachThreadInput(current_thread, foreground_thread, False)
+        user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+        if pid.value != os.getpid():
+            return False
     user32.keybd_event(0x1B, 0, 0, 0)
     user32.keybd_event(0x1B, 0, 2, 0)
     return True
@@ -131,7 +178,7 @@ def verify():
     project = scene.pm_vr_project
     problems = []
     expected = {
-        "finish": ["Probe_0.exr", "Probe_1.exr", "Probe_2.exr"],
+        "finish": ["Probe_0.exr", "Probe_0_Evening.exr", "Probe_1.exr", "Probe_1_Evening.exr", "Probe_2.exr", "Probe_2_Evening.exr"],
         "esc": [],
         "button": ["Probe_0.exr", "Probe_1.exr"],
     }[MODE]

@@ -1,6 +1,6 @@
 """Semantic layer export assembled from generated and original representations."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import os
 import shutil
 import tempfile
@@ -408,6 +408,7 @@ def export_semantic_layer(context, layer, format_name, textures=None):
     assembly = None
     folder = None
     own_textures = textures is None
+    representations = ExitStack()
     if own_textures:
         textures = ExportTextures()
     try:
@@ -419,6 +420,8 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         if layer.layer_type == 'RUNTIME':
             for name, problem in platform.runtime_warnings(objects):
                 log.warning('Export', f'{name}: {problem}')
+            from .probe_export import representations as probe_representations
+            objects = representations.enter_context(probe_representations(context, project, objects))
         _settle_uvs(objects, f"{layer.display_name} ({format_name})")
         final_path = _export_path(project, layer, looks.active_id(project), format_name)
         folder, temporary_path = _temporary_export_path(final_path)
@@ -459,6 +462,7 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         return "SUCCESS", final_path
     finally:
         _remove_assembly(context.scene, assembly)
+        representations.close()
         restore_generated_bindings(bindings)
         if folder:
             shutil.rmtree(folder, ignore_errors=True)

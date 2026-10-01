@@ -474,12 +474,12 @@ def draw_probes(layout, project):
     states = probe_states(project)
     cameras = {camera.name for state in states for camera in probe_cameras(project, state)}
     jobs = sum(len(probe_cameras(project, state)) for state in states)
-    box.label(text=f"Probes: {len(cameras)} panoramic camera(s) in Runtime", icon='WORLD')
+    box.label(text=f"Probes: {len(cameras)} camera(s), all lighting looks", icon='WORLD')
     row = box.row()
     row.enabled = bool(jobs)
     row.operator(
         "pmvr.render_probes",
-        text=f"Render {jobs} Probe(s)" + (f" • {' + '.join(s.title() for s in states)}" if states else ""),
+        text=f"Render {jobs} Probe(s)" + (f" • {' + '.join(looks.name(project, s) for s in states)}" if states else ""),
         icon='RENDER_STILL',
     )
     box.label(text=f"EXR Half ZIP -> {probe_directory(project)}", icon='FILE_FOLDER')

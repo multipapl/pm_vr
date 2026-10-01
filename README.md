@@ -26,6 +26,15 @@ The View3D sidebar is organized as four stages:
 
 Global source-root, lighting collections, worlds, bake defaults, and output
 directories live in **Project Settings** (the gear button in the panel header).
+
+**Probe Cameras** selects a collection, including all nested cameras of any
+type. Legacy projects automatically use their `Probes` collection when present.
+Render Probes renders every lighting look at each camera position, with +Y
+forward and Z up, regardless of camera rotation or the Bake checkboxes. The
+default panorama is 1024×512, RGB Half ZIP EXR. A JPEG from the same render is
+saved locally in `PMVR/ProbePreviews`; only EXRs belong in Sync. Assign probe
+cameras to Runtime so export includes their Empty representations. The
+authoring cameras remain unchanged.
 The `?` button next to it lists the naming and scene rules the pipeline relies on.
 New projects create `PMVR/Bakes`, `Flattened`, `Logs` and `ProbePreviews` beside
 the saved `.blend` during Initialize (or its first save). Existing projects keep

@@ -30,6 +30,7 @@ def _load_post(_filepath):
     for scene in bpy.data.scenes:
         if scene.pm_vr_project.initialized:
             looks.ensure(scene.pm_vr_project)
+            probes.migrate(scene.pm_vr_project)
     # Files saved by earlier versions may hold generated state materials
     # without a fake user; protect them before the next save drops them.
     generated.protect_all_generated_materials()
@@ -123,6 +124,7 @@ def register():
         for scene in bpy.data.scenes:
             if scene.pm_vr_project.initialized:
                 looks.ensure(scene.pm_vr_project)
+                probes.migrate(scene.pm_vr_project)
         identity.remember_identity_owners()
         generated.protect_all_generated_materials()
         _settle_generated_uvs()

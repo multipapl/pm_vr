@@ -2,6 +2,9 @@
 
 ## v3 development
 
+- Probe cameras come from a configured collection, including nested cameras of any type; legacy Probes is selected automatically.
+- Render Probes covers every lighting look, writes world-aligned RGB Half ZIP EXRs and local JPEG previews from the same render.
+- Runtime exports represent probes as Empties at their world positions; original cameras are restored even on export failure.
 - Lighting is a project list with one default and arbitrary additional looks; single-look projects work without an empty Evening.
 - DAY/EVENING IDs, result fields, generated tags and signatures remain compatible with v2. New bakes dual-write legacy results.
 - Bake/variants/queue resume, scene scenarios, preview and export support every configured look; validate suffix/variant filename collisions before a bake.

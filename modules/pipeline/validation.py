@@ -181,6 +181,9 @@ def _validate_scenarios(context):
 def validate_all(context):
     project = context.scene.pm_vr_project
     issues = validate_project(context)
+    from .probes import runtime_warnings as probe_warnings
+    for name, message in probe_warnings(project):
+        issues.append(Issue('WARNING', message, name))
     root_objects = set(project.source_root_collection.all_objects) if project.source_root_collection else set()
     output_names = {}
     for layer in project.render_layers:
