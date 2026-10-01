@@ -5,6 +5,7 @@ import time
 import uuid
 
 import bpy
+from . import looks
 
 from ..lightmap_baker.compositor import denoise_external_beauty, denoise_image, release_compositor_scene
 from ..lightmap_baker.images import create_float_image, remove_image
@@ -58,7 +59,9 @@ from .validation import object_render_visible, validate_unit
 def _record(project, unit, state, signature, image, status, message="", mode='BEAUTY'):
     record = project.build_records.add()
     record.unit_id = unit.unit_id
-    record.lighting_state = state
+    record.look_id = state
+    if state in looks.LEGACY:
+        record.lighting_state = state
     record.bake_mode = mode
     record.signature = signature
     record.image_name = image.name if image else ""
@@ -86,8 +89,8 @@ def mark_queue_done(project, unit_id, state, states):
     for index, entry in enumerate(project.bake_queue):
         if entry.unit_id != unit_id:
             continue
-        setattr(entry, done_flag(state), True)
-        if all(getattr(entry, done_flag(item)) for item in states):
+        looks.set_queue_done(entry, state)
+        if all(looks.queue_done(entry, item) for item in states):
             project.bake_queue.remove(index)
             project.active_bake_queue_index = min(
                 project.active_bake_queue_index, max(0, len(project.bake_queue) - 1)
@@ -113,7 +116,7 @@ class BeautyBakeRuntime:
         self.variant_id = variant_id
         self.variant = None
         self.operator = operator
-        self.state = self.project.active_lighting_state
+        self.state = looks.active_id(self.project)
         self._resolve()
         self.members = []
         self.receivers = []
@@ -146,7 +149,7 @@ class BeautyBakeRuntime:
                 raise PipelineBakeError("the variant was removed during the bake")
 
     def _unit_signature(self):
-        return self.unit.day_signature if self.state == 'DAY' else self.unit.evening_signature
+        return looks.result_value(self.unit, self.state, 'signature')
 
     def prepare(self):
         issues = validate_unit(self.context, self.unit, require_visible=True)
@@ -165,10 +168,10 @@ class BeautyBakeRuntime:
             problem = variants.variant_problem(self.project, self.unit)
             if problem:
                 raise PipelineBakeError(problem)
-            status = self.unit.day_status if self.state == 'DAY' else self.unit.evening_status
+            status = looks.result_value(self.unit, self.state, 'status')
             if not self._unit_signature() or status != "Ready":
                 raise PipelineBakeError(
-                    f"the unit has no {self.state.title()} bake; its variants bake after it"
+                    f"the unit has no {looks.name(self.project, self.state)} bake; its variants bake after it"
                 )
             material_map = {self.unit.variant_material.name_full: self.variant.material}
 
@@ -229,7 +232,7 @@ class BeautyBakeRuntime:
         self.config.configure('COMBINED', self.margin, False, all_passes)
         log.info(
             "Beauty",
-            f'Start {self.state.title()} unit "{self.unit.display_name}"'
+            f'Start {looks.name(self.project, self.state)} unit "{self.unit.display_name}"'
             + (f' variant "{self.variant.title}"' if self.variant else '')
             + ': '
             f'{len(self.receivers)} object(s), {self.bake_size}px'
@@ -369,7 +372,7 @@ class BeautyBakeRuntime:
         self.finished = True
         log.info(
             "Beauty",
-            f'Completed {self.state.title()} unit "{self.unit.display_name}" variant '
+            f'Completed {looks.name(self.project, self.state)} unit "{self.unit.display_name}" variant '
             f'"{self.variant.title}" in {log.duration(time.monotonic() - self.started_at)}',
         )
         self.cleanup(keep_image=False)
@@ -443,11 +446,7 @@ class BeautyBakeRuntime:
             staged_file.cleanup()
         staged_file.finalize()
         log.info("Beauty", f'Saved external image: "{staged_file.final_path}"')
-        old_image_name = (
-            self.unit.day_beauty_image
-            if self.state == 'DAY'
-            else self.unit.evening_beauty_image
-        )
+        old_image_name = looks.result_value(self.unit, self.state, 'image_name')
         if old_image_name and old_image_name != self.image.name:
             old_image = bpy.data.images.get(old_image_name)
             if old_image and old_image.users == 0:
@@ -457,37 +456,16 @@ class BeautyBakeRuntime:
             self.unit,
             self.state,
         )
-        if self.state == 'DAY':
-            self.unit.day_signature = self.signature
-            self.unit.day_beauty_image = self.image.name
-            self.unit.day_status = "Ready"
-            self.unit.day_baked_resolution = self.bake_size
-        else:
-            self.unit.evening_signature = self.signature
-            self.unit.evening_beauty_image = self.image.name
-            self.unit.evening_status = "Ready"
-            self.unit.evening_baked_resolution = self.bake_size
-        other_signature = (
-            self.unit.evening_signature
-            if self.state == 'DAY'
-            else self.unit.day_signature
-        )
-        if other_signature and not same_structure(other_signature, self.signature):
-            if self.state == 'DAY':
-                self.unit.evening_status = (
-                    "Structurally incompatible — rebake required"
-                )
-            else:
-                self.unit.day_status = (
-                    "Structurally incompatible — rebake required"
-                )
-        elif other_signature:
-            # The other state matches this structure: an earlier false alarm
-            # (Bevel UV noise) no longer stands.
-            if self.state == 'DAY' and self.unit.evening_status.startswith("Structurally incompatible"):
-                self.unit.evening_status = "Ready"
-            elif self.state == 'EVENING' and self.unit.day_status.startswith("Structurally incompatible"):
-                self.unit.day_status = "Ready"
+        looks.set_result(self.unit, self.state, signature=self.signature,
+                         image_name=self.image.name, status='Ready', baked_resolution=self.bake_size)
+        for other in looks.result_ids(self.unit):
+            if other == self.state:
+                continue
+            signature = looks.result_value(self.unit, other, 'signature')
+            if signature and not same_structure(signature, self.signature):
+                looks.set_result(self.unit, other, status='Structurally incompatible — rebake required')
+            elif signature and looks.result_value(self.unit, other, 'status').startswith('Structurally incompatible'):
+                looks.set_result(self.unit, other, status='Ready')
         _record(
             self.project,
             self.unit,
@@ -506,7 +484,7 @@ class BeautyBakeRuntime:
         self.finished = True
         log.info(
             "Beauty",
-            f'Completed {self.state.title()} unit "{self.unit.display_name}" '
+            f'Completed {looks.name(self.project, self.state)} unit "{self.unit.display_name}" '
             f'in {log.duration(time.monotonic() - self.started_at)}',
         )
         self.cleanup(keep_image=True)
@@ -526,7 +504,7 @@ class BeautyBakeRuntime:
         # is a bug and needs its traceback. fail() is called from except blocks.
         log.error(
             "Beauty",
-            f'Failed {self.state.title()} unit "{label or self.unit_id}" after '
+            f'Failed {looks.name(self.project, self.state)} unit "{label or self.unit_id}" after '
             f'{log.duration(time.monotonic() - self.started_at)}: {exc}',
             with_traceback=not isinstance(exc, PipelineBakeError),
         )
@@ -546,7 +524,7 @@ class BeautyBakeRuntime:
         label = self._label()
         log.warning(
             "Beauty",
-            f'Cancelled {self.state.title()} unit "{label or self.unit_id}": '
+            f'Cancelled {looks.name(self.project, self.state)} unit "{label or self.unit_id}": '
             f'{reason}; previous result kept',
         )
         if label is not None:
@@ -609,7 +587,7 @@ class BeautyBakeRuntime:
 def bake_lightmap_unit(context, unit, operator=None):
     project = context.scene.pm_vr_project
     layer = find_layer(project, unit.render_layer_id)
-    state = project.active_lighting_state
+    state = looks.active_id(project)
     issues = validate_unit(context, unit, require_visible=True)
     errors = [issue.message for issue in issues if issue.severity == 'ERROR']
     if errors:
@@ -709,16 +687,8 @@ def bake_lightmap_unit(context, unit, operator=None):
         finally:
             staged_file.cleanup()
         staged_file.finalize()
-        if state == 'DAY':
-            old_image_name = unit.day_lightmap_image
-            unit.day_lightmap_signature = signature
-            unit.day_lightmap_image = raw.name
-            unit.day_lightmap_status = "Ready"
-        else:
-            old_image_name = unit.evening_lightmap_image
-            unit.evening_lightmap_signature = signature
-            unit.evening_lightmap_image = raw.name
-            unit.evening_lightmap_status = "Ready"
+        old_image_name = looks.result_value(unit, state, 'image_name', 'LIGHTMAP')
+        looks.set_result(unit, state, mode='LIGHTMAP', signature=signature, image_name=raw.name, status='Ready')
         if old_image_name and old_image_name != raw.name:
             old_image = bpy.data.images.get(old_image_name)
             if old_image and old_image.users == 0:
@@ -843,7 +813,7 @@ class PMVR_OT_CancelBakeQueue(bpy.types.Operator):
 class PMVR_OT_BakeQueue(bpy.types.Operator):
     bl_idname = "pmvr.bake_queue"
     bl_label = "Bake Queue"
-    bl_description = "Bake every queued unit for the checked Day/Evening states"
+    bl_description = "Bake every queued unit for the checked lighting looks"
 
     @classmethod
     def poll(cls, context):
@@ -855,15 +825,11 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             self.report({'ERROR'}, "Interactive Cycles bake is required")
             return {'CANCELLED'}
         project = context.scene.pm_vr_project
-        states = []
-        if project.bake_day:
-            states.append('DAY')
-        if project.bake_evening:
-            states.append('EVENING')
+        states = looks.checked(project)
         if not states:
-            self.report({'ERROR'}, "Choose Day, Evening, or both")
+            self.report({'ERROR'}, "Choose at least one lighting look to bake")
             return {'CANCELLED'}
-        already = sum(getattr(entry, done_flag(state)) for state in states for entry in project.bake_queue)
+        already = sum(looks.queue_done(entry, state) for state in states for entry in project.bake_queue)
         if project.bake_mode == 'BEAUTY' and already == len(states) * len(project.bake_queue):
             project.last_operation_summary = (
                 f"Every queued unit is already baked for {' + '.join(s.title() for s in states)} "
@@ -915,7 +881,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             return self._execute_lightmap(context, states)
 
         entries = [
-            (entry.unit_id, {state for state in states if getattr(entry, done_flag(state))})
+            (entry.unit_id, {state for state in states if looks.queue_done(entry, state)})
             for entry in project.bake_queue
         ]
         if already:
@@ -925,7 +891,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             )
         self._project = project
         self._states = states
-        self._original_state = project.active_lighting_state
+        self._original_state = looks.active_id(project)
         self._jobs = []
         for state in states:
             for unit_id, done in entries:
@@ -1142,7 +1108,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             unit = find_unit(self._project, unit_id)
             variant = variants.find_variant(unit, variant_id) if unit and variant_id else None
             self._feedback.begin_object(
-                f"{state.title()} — {unit.display_name if unit else 'Missing unit'}"
+                f"{looks.name(self._project, state)} — {unit.display_name if unit else 'Missing unit'}"
                 + (f" — {variant.title}" if variant else ""),
                 self._job_cursor,
                 len(self._jobs),
@@ -1162,12 +1128,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 self._current_runtime = runtime
                 status = runtime.prepare()
                 if status == "SKIPPED":
-                    other = "Day" if state == 'EVENING' else "Evening"
                     log.info(
                         "Beauty",
-                        f'Skipped {state.title()} unit "{unit.display_name}": none of its '
-                        f'objects is in the {state.title()} scene (for example they live only '
-                        f'in the {other} lighting collection)',
+                        f'Skipped {looks.name(self._project, state)} unit "{unit.display_name}": none of its '
+                        f'objects is in this lighting look',
                     )
                     runtime.cleanup(keep_image=False)
                     self._current_runtime = None
@@ -1185,7 +1149,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 else:
                     log.error(
                         "Beauty",
-                        f'Failed {state.title()} unit "{unit.display_name}": {exc}',
+                        f'Failed {looks.name(self._project, state)} unit "{unit.display_name}": {exc}',
                         with_traceback=not isinstance(exc, PipelineBakeError),
                     )
                 self._feedback.complete_object()
@@ -1270,7 +1234,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         except Exception as exc:
             log.warning("Bake", f"Could not remove the denoise compositor scene: {exc}")
         restore_viewport_shading(self._viewport_shading)
-        state_label = " + ".join(state.title() for state in self._states)
+        state_label = " + ".join(looks.name(self._project, state) for state in self._states)
         summary = (
             f"Beauty ({state_label}): {self._succeeded} ready, "
             f"{self._skipped} skipped, {self._failed} failed"
@@ -1301,7 +1265,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
     def _execute_lightmap(self, context, states):
         project = context.scene.pm_vr_project
         entries = [entry.unit_id for entry in project.bake_queue]
-        original_state = project.active_lighting_state
+        original_state = looks.active_id(project)
         total_jobs = len(entries) * len(states)
         feedback = BakeProgressFeedback(context)
         project.operation_running = True
@@ -1321,7 +1285,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                     job_index += 1
                     unit = find_unit(project, unit_id)
                     feedback.begin_object(
-                        f"{state.title()} — {unit.display_name if unit else 'Missing unit'}",
+                        f"{looks.name(project, state)} — {unit.display_name if unit else 'Missing unit'}",
                         job_index,
                         total_jobs,
                     )
@@ -1376,7 +1340,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 release_compositor_scene()
             except Exception as exc:
                 log.warning("Bake", f"Could not remove the denoise compositor scene: {exc}")
-        state_label = " + ".join(state.title() for state in states)
+        state_label = " + ".join(looks.name(project, state) for state in states)
         summary = (
             f"Lightmap ({state_label}): {succeeded} ready, "
             f"{skipped} skipped, {failed} failed"

@@ -21,6 +21,7 @@ if /I "%~1"=="gui" (
     call :run "%~dp0tests\blender_gui_bake_resume.py" simulate
     call :run "%~dp0tests\blender_gui_bake_autosave.py" simulate
     call :run "%~dp0tests\blender_gui_image_editor.py" window
+    call :run "%~dp0tests\blender_gui_lighting_looks.py" simulate
     call :run "%~dp0tests\blender_gui_probes.py" simulate finish
     call :run "%~dp0tests\blender_gui_probes.py" simulate button
     call :run "%~dp0tests\blender_gui_probes.py" window esc

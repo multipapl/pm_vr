@@ -19,7 +19,7 @@ The View3D sidebar is organized as four stages:
 1. **Optimize** — the existing manual audit, naming, UV, texel-density, relink,
    and texture tools.
 2. **Setup** — semantic render layers, layer-filtered bake units, per-unit
-   resolution, and Day/Evening lighting configuration.
+   resolution, and project lighting configuration.
 3. **Bake** — a persistent bake-unit queue with Beauty/Lightmap mode selection.
 4. **Export** — checked semantic layers assembled from generated Beauty objects
    plus untouched Export Original objects and exported to USDZ/GLB.
@@ -38,8 +38,15 @@ survives a crash; Project Settings shows the path and opens the folder. The last
 
 ## Production Beauty workflow
 
-Initialize the project, configure Source Root plus Day/Evening collections and
-worlds, then create semantic render layers. A render layer's name is also its
+Initialize the project, configure Source Root and the Lighting list in Project
+Settings, then create semantic render layers. Each look has a light collection
+and World; a project can have just one. One default exports without a suffix;
+others use `_<Name>`. Names must be distinct Latin words without underscores,
+different from layer types and zone names. The Lighting buttons choose what is
+shown and exported; Bake for checks choose what the queue bakes. Existing
+projects migrate automatically to Day/Evening with unchanged IDs, paths and
+results. New Day/Evening bakes also update the legacy fields for v2 rollback.
+A render layer's name is also its
 export filename stem.
 
 With a render layer active, click `+` to turn every selected mesh into a separate

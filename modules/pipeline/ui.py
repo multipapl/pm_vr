@@ -1,6 +1,7 @@
 """Four-stage pipeline UI lists and stage drawing."""
 
 import bpy
+from . import looks
 
 from .bake_scene import PipelineBakeError
 from .constants import BAKE_LAYER_TYPES
@@ -30,7 +31,7 @@ def short_resolution(size):
 
 
 def beauty_status(unit, state):
-    status = (unit.day_status if state == 'DAY' else unit.evening_status) or "—"
+    status = looks.result_value(unit, state, 'status') or '—'
     baked = baked_resolution(unit, state)
     if status == "Ready" and 0 < baked < int(unit.resolution):
         # A test bake, or Setup raised after baking: rebake before export.
@@ -46,9 +47,11 @@ def last_baked(project, unit):
             record.unit_id == unit.unit_id and record.bake_mode == 'BEAUTY'
             and record.status == "SUCCESS" and not record.message.startswith("variant ")
         ):
-            latest[record.lighting_state] = max(latest.get(record.lighting_state, ""), record.timestamp)
+            state = looks.record_id(record)
+            latest[state] = max(latest.get(state, ""), record.timestamp)
     result = []
-    for state, label in (('DAY', "D"), ('EVENING', "E")):
+    for look in project.lighting_looks:
+        state, label = look.look_id, look.display_name
         stamp = latest.get(state, "")
         if len(stamp) >= 16:
             result.append((label, f"{stamp[8:10]}.{stamp[5:7]} {stamp[11:16]}"))
@@ -58,12 +61,13 @@ def last_baked(project, unit):
 def draw_state_switch(layout, project):
     row = layout.row(align=True)
     row.label(text="Lighting:")
-    for state, label, icon in (('DAY', "Day", 'LIGHT_SUN'), ('EVENING', "Evening", 'LIGHT')):
+    for look in project.lighting_looks:
+        state, label, icon = look.look_id, look.display_name, 'LIGHT_SUN' if look.is_default else 'LIGHT'
         op = row.operator(
             "pmvr.set_lighting_state",
             text=label,
             icon=icon,
-            depress=project.active_lighting_state == state,
+            depress=looks.active_id(project) == state,
         )
         op.state = state
 
@@ -113,7 +117,8 @@ class PMVR_UL_BakeQueue(bpy.types.UIList):
         split = layout.split(factor=0.35, align=True)
         split.label(text=unit.display_name + (f" +{len(unit.variants)} var." if len(unit.variants) else ""))
         right = split.row(align=True)
-        done = ("D" if item.day_done else "") + ("E" if item.evening_done else "")
+        done = ', '.join(look.display_name for look in context.scene.pm_vr_project.lighting_looks
+                         if looks.queue_done(item, look.look_id))
         if done:
             # Baked in this queue; the entry leaves once every state is done.
             mark = right.row(align=True)
@@ -270,11 +275,12 @@ def draw_variants(layout, project, unit):
         row = box.row(align=True)
         row.prop(variant, "title", text="")
         row.prop(variant, "material", text="")
-        states = [variant_status(unit, variant, state) for state in ('DAY', 'EVENING')]
+        states = [variant_status(unit, variant, look.look_id) for look in project.lighting_looks]
         status = row.row(align=True)
         status.ui_units_x = 1.6
         status.alert = "Rebake" in states
-        status.label(text=("D" if states[0] else "·") + ("E" if states[1] else "·"))
+        status.label(text=' / '.join(look.display_name if value else '·'
+                                    for look, value in zip(project.lighting_looks, states)))
         op = row.operator("pmvr.remove_bake_variant", text="", icon='X')
         op.index = index
     box.prop(unit, "variant_marker")
@@ -311,16 +317,14 @@ def draw_bake_units(layout, project):
         members.label(text=f"Members: {len(unit_members(unit.unit_id))}")
         members.operator("pmvr.assign_selected_to_unit", text="", icon='ADD')
         members.operator("pmvr.remove_selected_from_unit", text="", icon='REMOVE')
-        status_row = detail.row(align=True)
-        status_row.label(text=f"Beauty D: {beauty_status(unit, 'DAY')}")
-        status_row.label(text=f"E: {beauty_status(unit, 'EVENING')}")
+        for look in project.lighting_looks:
+            detail.label(text=f"Beauty {look.display_name}: {beauty_status(unit, look.look_id)}")
         baked = last_baked(project, unit)
         if baked:
             detail.label(text="Last baked: " + ", ".join(f"{state} {time}" for state, time in baked))
         if SHOW_LIGHTMAP:
-            lightmap_row = detail.row(align=True)
-            lightmap_row.label(text=f"Lightmap D: {unit.day_lightmap_status or '—'}")
-            lightmap_row.label(text=f"E: {unit.evening_lightmap_status or '—'}")
+            for look in project.lighting_looks:
+                detail.label(text=f"Lightmap {look.display_name}: {looks.result_value(unit, look.look_id, 'status', 'LIGHTMAP') or '—'}")
         row = detail.row(align=True)
         op = row.operator("pmvr.select_pipeline_items", text="Select Sources")
         op.target = 'UNIT_SOURCES'
@@ -415,11 +419,11 @@ def draw_bake(layout, context):
     op.direction = 'UP'
     op = controls.operator("pmvr.move_queue_entry", text="", icon='TRIA_DOWN')
     op.direction = 'DOWN'
-    day_done = sum(entry.day_done for entry in project.bake_queue)
-    evening_done = sum(entry.evening_done for entry in project.bake_queue)
-    if day_done or evening_done:
+    completed = [(look.display_name, sum(looks.queue_done(entry, look.look_id) for entry in project.bake_queue))
+                 for look in project.lighting_looks]
+    if any(count for _, count in completed):
         queue.label(
-            text=f"Already baked in this queue: Day {day_done}, Evening {evening_done}; Bake continues",
+            text='Already baked in this queue: ' + ', '.join(f'{name} {count}' for name, count in completed) + '; Bake continues',
             icon='CHECKMARK',
         )
     buttons = queue.row(align=True)
@@ -438,8 +442,8 @@ def draw_bake(layout, context):
     )
     states = queue.row(align=True)
     states.label(text="Bake for:")
-    states.prop(project, "bake_day", text="Day")
-    states.prop(project, "bake_evening", text="Evening")
+    for look in project.lighting_looks:
+        states.prop(look, 'bake_enabled', text=look.display_name)
     run = queue.row()
     run.scale_y = 1.4
     if project.operation_running:
@@ -495,7 +499,7 @@ def draw_export(layout, context):
         row = box.row(align=True)
         row.prop(layer, "export_usdz", toggle=True)
         row.prop(layer, "export_glb", toggle=True)
-        suffix = "" if project.active_lighting_state == 'DAY' else "_Evening"
+        suffix = looks.suffix(project, looks.active_id(project))
         box.label(text=f"Output: {layer.display_name}{suffix}", icon='FILE')
         extras = box.box()
         guests = extra_export_members(layer.layer_id)

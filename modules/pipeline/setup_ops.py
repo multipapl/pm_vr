@@ -4,6 +4,7 @@ import math
 import os
 
 import bpy
+from . import looks
 
 from ..scene_diagnostics import get_target_td, measure_texel_areas
 from .constants import (
@@ -40,7 +41,7 @@ from .identity import (
 )
 from .state import PipelineStateError, activate_state
 from .validation import validate_all
-from . import log, working_directory
+from . import log, looks, working_directory
 
 
 SUPPORTED_RESOLUTIONS = tuple(int(item[0]) for item in RESOLUTION_ITEMS)
@@ -317,6 +318,7 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
         project = context.scene.pm_vr_project
         working_directory.initialize(project)
         ensure_project_id(project)
+        looks.ensure(project)
         project.schema_version = SCHEMA_VERSION
         working_directory.ensure_new_folders(project)
         if not project.render_layers:
@@ -672,7 +674,7 @@ def test_resolution_label(project):
 
 
 def baked_resolution(unit, state):
-    return unit.day_baked_resolution if state == 'DAY' else unit.evening_baked_resolution
+    return looks.result_value(unit, state, 'baked_resolution')
 
 
 def reset_test_resolution():
@@ -863,8 +865,8 @@ def queue_units(project, unit_ids):
             entries[unit_id] = project.bake_queue.add()
             entries[unit_id].unit_id = unit_id
             added += 1
-        elif entry.day_done or entry.evening_done:
-            entry.day_done = entry.evening_done = False
+        elif entry.day_done or entry.evening_done or entry.completed_looks:
+            looks.clear_queue_done(entry)
             requeued += 1
         else:
             already += 1
@@ -1009,7 +1011,7 @@ class PMVR_OT_SetLightingState(bpy.types.Operator):
     bl_idname = "pmvr.set_lighting_state"
     bl_label = "Set Lighting State"
     bl_description = "Show this lighting state: its lights, world and baked results"
-    state: bpy.props.EnumProperty(items=(('DAY', "Day", ""), ('EVENING', "Evening", "")))
+    state: bpy.props.StringProperty(default='DAY')
 
     @classmethod
     def poll(cls, context):
@@ -1024,7 +1026,7 @@ class PMVR_OT_SetLightingState(bpy.types.Operator):
         # The queue switches states through activate_state() alone; only this
         # button also changes what the baked results show.
         preview_state(context.scene.pm_vr_project)
-        self.report({'INFO'}, f"{self.state.title()} lighting is active")
+        self.report({'INFO'}, f"{looks.name(context.scene.pm_vr_project, self.state)} lighting is active")
         return {'FINISHED'}
 
 
@@ -1164,7 +1166,7 @@ def preview_generated(project):
 def preview_state(project):
     """Let baked results show the materials of the active lighting state."""
     for unit in project.bake_units:
-        bind_generated_state(unit, project.active_lighting_state, project.bake_mode)
+        bind_generated_state(unit, looks.active_id(project), project.bake_mode)
 
 
 class PMVR_OT_TogglePreview(bpy.types.Operator):
@@ -1200,14 +1202,18 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         project = context.scene.pm_vr_project
         layout = self.layout
         layout.prop(project, "source_root_collection")
-        day = layout.box()
-        day.label(text="Day", icon='LIGHT_SUN')
-        day.prop(project, "day_lighting_collection")
-        day.prop(project, "day_world")
-        evening = layout.box()
-        evening.label(text="Evening", icon='LIGHT')
-        evening.prop(project, "evening_lighting_collection")
-        evening.prop(project, "evening_world")
+        lighting = layout.box()
+        lighting.enabled = not project.operation_running
+        lighting.label(text="Lighting", icon='LIGHT')
+        for look in project.lighting_looks:
+            row = lighting.row(align=True)
+            op = row.operator('pmvr.default_lighting_look', text='',
+                              icon='RADIOBUT_ON' if look.is_default else 'RADIOBUT_OFF')
+            op.look_id = look.look_id
+            row.prop(look, 'display_name', text='')
+            lighting.prop(look, 'lighting_collection')
+            lighting.prop(look, 'world')
+        lighting.operator('pmvr.add_lighting_look', icon='ADD')
         bake = layout.box()
         bake.label(text="Bake Defaults", icon='RENDER_STILL')
         bake.prop(project, "bake_resolution")

@@ -11,6 +11,7 @@ from . import (
     generated,
     identity,
     log,
+    looks,
     probes,
     scenarios,
     scene_debug,
@@ -26,6 +27,9 @@ from . import (
 @persistent
 def _load_post(_filepath):
     working_directory.migrate_all()
+    for scene in bpy.data.scenes:
+        if scene.pm_vr_project.initialized:
+            looks.ensure(scene.pm_vr_project)
     # Files saved by earlier versions may hold generated state materials
     # without a fake user; protect them before the next save drops them.
     generated.protect_all_generated_materials()
@@ -104,7 +108,7 @@ _HANDLERS = (
 
 
 def register():
-    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES):
+    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *looks.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES):
         bpy.utils.register_class(cls)
     data.register_properties()
     selection_sync.register()
@@ -116,6 +120,9 @@ def register():
             handlers.append(handler)
     try:
         working_directory.migrate_all()
+        for scene in bpy.data.scenes:
+            if scene.pm_vr_project.initialized:
+                looks.ensure(scene.pm_vr_project)
         identity.remember_identity_owners()
         generated.protect_all_generated_materials()
         _settle_generated_uvs()
@@ -140,7 +147,7 @@ def unregister():
     viewport_overlay.unregister()
     selection_sync.unregister()
     data.unregister_properties()
-    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES)):
+    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *looks.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES)):
         bpy.utils.unregister_class(cls)
 
 

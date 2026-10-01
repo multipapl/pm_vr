@@ -7,6 +7,7 @@ import tempfile
 import uuid
 
 import bpy
+from . import looks
 
 from .. import collection_export
 from .bake_files import png_size, scale_atlas
@@ -53,13 +54,14 @@ def _generated_for_source(source, unit_id, index):
 
 
 def _unit_ready(unit, state):
-    signature = unit.day_signature if state == 'DAY' else unit.evening_signature
-    status = unit.day_status if state == 'DAY' else unit.evening_status
-    other = unit.evening_signature if state == 'DAY' else unit.day_signature
+    signature = looks.result_value(unit, state, 'signature')
+    status = looks.result_value(unit, state, 'status')
     if not signature or status != "Ready":
-        return False, f'{unit.display_name}: {state.title()} Beauty is not ready'
-    if other and not same_structure(other, signature):
-        return False, f'{unit.display_name}: Day/Evening structure is incompatible; rebake both states'
+        return False, f'{unit.display_name}: {looks.name(bpy.context.scene.pm_vr_project, state)} Beauty is not ready'
+    if any(looks.result_value(unit, other, 'signature') and
+           not same_structure(looks.result_value(unit, other, 'signature'), signature)
+           for other in looks.result_ids(unit) if other != state):
+        return False, f'{unit.display_name}: lighting structure is incompatible; rebake the affected looks'
     return True, ""
 
 
@@ -68,19 +70,19 @@ def other_state_objects(project, state):
     collection (evening-only lamps, say). They are the only objects a state's
     export leaves out: export follows the setup, not what happens to be
     visible, excluded or render-disabled in the file."""
-    other = project.evening_lighting_collection if state == 'DAY' else project.day_lighting_collection
-    if not other:
-        return set()
-    inside = {other.name_full, *(collection.name_full for collection in other.children_recursive)}
+    looks.ensure(project)
+    others = [look.lighting_collection for look in project.lighting_looks
+              if look.look_id != state and look.lighting_collection]
+    inside = {collection.name_full for other in others for collection in (other, *other.children_recursive)}
     return {
-        obj.as_pointer() for obj in other.all_objects
+        obj.as_pointer() for other in others for obj in other.all_objects
         if all(collection.name_full in inside for collection in obj.users_collection)
     }
 
 
 def resolve_layer_objects(context, layer):
     project = context.scene.pm_vr_project
-    state = project.active_lighting_state
+    state = looks.active_id(project)
     resolved = []
     seen = set()
     bound_units = set()
@@ -218,7 +220,7 @@ def _export_path(project, layer, state, format_name):
         raise PipelineExportError(f"Save the .blend file before using a relative {format_name} directory")
     directory = bpy.path.abspath(directory_value)
     os.makedirs(directory, exist_ok=True)
-    suffix = "" if state == 'DAY' else "_Evening"
+    suffix = looks.suffix(project, state)
     extension = ".usdz" if format_name == 'USDZ' else ".glb"
     return os.path.join(directory, f"{safe_stem(layer.display_name)}{suffix}{extension}")
 
@@ -285,7 +287,7 @@ def _export_variants(context, project, layer, state, textures, written_paths=Non
             if status != "Ready":
                 problems.append(
                     f'"{unit.display_name}" variant "{variant.title}": '
-                    + (f"no {state.title()} bake" if not status else "baked before the unit's last bake; rebake the unit")
+                    + (f"no {looks.name(project, state)} bake" if not status else "baked before the unit's last bake; rebake the unit")
                 )
                 continue
             image = bpy.data.images.load(bpy.path.abspath(variants.variant_file(variant, state)), check_existing=False)
@@ -412,13 +414,13 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         objects = resolve_layer_objects(context, layer)
         if not objects:
             if format_name == 'USDZ':
-                export_description.write(project, project.active_lighting_state, excluded=(layer.layer_id,))
+                export_description.write(project, looks.active_id(project), excluded=(layer.layer_id,))
             return "SKIPPED", "no objects for the active state"
         if layer.layer_type == 'RUNTIME':
             for name, problem in platform.runtime_warnings(objects):
                 log.warning('Export', f'{name}: {problem}')
         _settle_uvs(objects, f"{layer.display_name} ({format_name})")
-        final_path = _export_path(project, layer, project.active_lighting_state, format_name)
+        final_path = _export_path(project, layer, looks.active_id(project), format_name)
         folder, temporary_path = _temporary_export_path(final_path)
         assembly = _make_assembly(context.scene, layer, objects)
         exporter = collection_export.export_usdz if format_name == 'USDZ' else collection_export.export_glb
@@ -446,14 +448,14 @@ def export_semantic_layer(context, layer, format_name, textures=None):
         committed = [final_path]
         if format_name == 'USDZ' and layer.layer_type == 'UNLIT':
             written, problems = _export_variants(
-                context, project, layer, project.active_lighting_state, textures, written_paths=committed
+                context, project, layer, looks.active_id(project), textures, written_paths=committed
             )
             if written:
                 log.info("Export", f"{layer.display_name}: {written} variant file(s) in {variants.FOLDER}/")
             for problem in problems:
                 log.warning("Export", f"Variant not exported: {problem}")
         if format_name == 'USDZ':
-            export_description.write(project, project.active_lighting_state, committed)
+            export_description.write(project, looks.active_id(project), committed)
         return "SUCCESS", final_path
     finally:
         _remove_assembly(context.scene, assembly)
@@ -487,7 +489,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             self.report({'ERROR'}, f"Export blocked: {len(duplicate_ids)} duplicate source ID(s); repair them first")
             return {'CANCELLED'}
         try:
-            activate_state(context, project.active_lighting_state)
+            activate_state(context, looks.active_id(project))
         except Exception as exc:
             self.report({'ERROR'}, str(exc))
             return {'CANCELLED'}
@@ -508,7 +510,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             return {'CANCELLED'}
         # A test bake (or Setup raised after baking) is still a valid result;
         # say so instead of shipping lower-resolution textures unnoticed.
-        state = project.active_lighting_state
+        state = looks.active_id(project)
         exported_layers = {layer.layer_id for layer, _format_name in jobs}
         below_setup = [
             unit.display_name for unit in project.bake_units
@@ -527,7 +529,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         cancelled = False
         log.info(
             "Export",
-            f"Start: {len(jobs)} file(s), {project.active_lighting_state.title()}, "
+            f"Start: {len(jobs)} file(s), {looks.name(project, looks.active_id(project))}, "
             f"{bpy.data.filepath or 'unsaved file'}",
         )
         project.operation_running = True
@@ -569,7 +571,7 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
             manifest = write_variant_manifest(project)
             if manifest:
                 log.info("Export", f"Material variants: {manifest[1]} object(s) -> {manifest[0]}")
-            export_description.write(project, project.active_lighting_state)
+            export_description.write(project, looks.active_id(project))
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"

@@ -6,6 +6,7 @@ import os
 import time
 
 import bpy
+from . import looks
 from mathutils import Matrix
 
 from ..lightmap_baker.progress import BakeProgressFeedback
@@ -39,7 +40,7 @@ def probe_cameras(project, state):
 
 
 def probe_states(project):
-    return [state for state, on in (('DAY', project.bake_day), ('EVENING', project.bake_evening)) if on]
+    return looks.checked(project)
 
 
 def probe_directory(project):
@@ -51,7 +52,7 @@ def probe_directory(project):
 
 def probe_path(project, camera, state):
     # Named like the camera's prim in the Runtime USDZ: the app pairs them by name.
-    suffix = "" if state == 'DAY' else "_Evening"
+    suffix = looks.suffix(project, state)
     return os.path.join(probe_directory(project), f"{usd_name(camera.name)}{suffix}.exr")
 
 
@@ -80,7 +81,7 @@ class ProbeSession:
         self.context = context
         self.scene = scene
         self.project = scene.pm_vr_project
-        self.original_state = self.project.active_lighting_state
+        self.original_state = looks.active_id(self.project)
         self.state = None
         self.camera = scene.camera
         self.render = {name: getattr(scene.render, name) for name in self.RENDER if hasattr(scene.render, name)}

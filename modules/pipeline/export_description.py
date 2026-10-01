@@ -7,14 +7,17 @@ import tempfile
 
 import bpy
 
-from . import variants
+from . import variants, looks
 from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
 from .identity import safe_stem, unit_members
 
 
 def look_info(project, state):
-    return {'id': state, 'name': 'Day' if state == 'DAY' else 'Evening',
-            'suffix': '' if state == 'DAY' else '_Evening', 'default': state == 'DAY'}
+    look = looks.find(project, state)
+    if look is None:
+        raise ValueError('Lighting look was removed')
+    return {'id': state, 'name': look.display_name,
+            'suffix': looks.suffix(project, state), 'default': look.is_default}
 
 
 def _atomic_json(path, value):
@@ -90,4 +93,15 @@ def write(project, state, written=(), excluded=()):
                 'settings': {'reflectionIntensity': intensity},
                 'exportedAt': datetime.now().astimezone().isoformat(), 'files': entries}
     _atomic_json(path, document)
+    # A renamed look must not remain discoverable through its old description.
+    # Packages remain on disk; only metadata owned by this look is replaced.
+    for previous_path in staging.glob('PMVR_Export_*.json'):
+        if previous_path == path:
+            continue
+        try:
+            old = json.loads(previous_path.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            continue
+        if old.get('schema') == 1 and old.get('look', {}).get('id') == state:
+            previous_path.unlink()
     return str(path)

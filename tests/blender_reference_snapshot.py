@@ -78,6 +78,8 @@ for scene in bpy.data.scenes:
         for variant in unit.variants:
             for field in ('day_file', 'evening_file'):
                 rewrite(variant, field)
+            for result in getattr(variant, 'look_results', ()):
+                rewrite(result, 'file')
     scene.render.filepath = str(root / 'Renders' / scene.name)
     compositor = getattr(scene, 'compositing_node_group', None) or getattr(scene, 'node_tree', None)
     if compositor:
@@ -97,12 +99,16 @@ def audit():
     for scene in bpy.data.scenes:
         project = scene.pm_vr_project
         for field in ('beauty_output_directory', 'lightmap_output_directory',
-                      'usdz_output_directory', 'glb_output_directory', 'probe_output_directory'):
+                      'usdz_output_directory', 'glb_output_directory', 'probe_output_directory',
+                      'flattened_output_directory', 'log_output_directory', 'probe_preview_directory'):
+            if not hasattr(project, field):
+                continue
             path = Path(bpy.path.abspath(getattr(project, field))).resolve()
             assert path.is_relative_to(root), (field, path)
         for unit in project.bake_units:
             for variant in unit.variants:
                 paths += [p for p in (variant.day_file, variant.evening_file) if p]
+                paths += [result.file for result in getattr(variant, 'look_results', ()) if result.file]
     for value in paths:
         path = Path(bpy.path.abspath(value)).resolve()
         assert not any(path.is_relative_to(source / folder)

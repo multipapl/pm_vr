@@ -5,6 +5,7 @@ import struct
 import uuid
 
 import bpy
+from . import looks
 import numpy
 
 from ..lightmap_baker.images import StagedExport, save_linear_exr, temporary_scene
@@ -48,7 +49,7 @@ def _point_image_at_file(image, filepath, file_format):
 def _beauty_final_path(context, unit, state, variant=""):
     project = context.scene.pm_vr_project
     directory = _output_directory(project.beauty_output_directory, "Beauty")
-    suffix = ("" if not variant else f"_{safe_stem(variant)}") + ("" if state == 'DAY' else "_Evening")
+    suffix = ("" if not variant else f"_{safe_stem(variant)}") + looks.suffix(project, state)
     layer = find_layer(project, unit.render_layer_id)
     layer_name = layer.display_name if layer else "Layer"
     stem = safe_stem(f"{layer_name}_{unit.display_name}")
@@ -220,7 +221,7 @@ def beauty_image_name(layer, unit, state):
 def stage_lightmap_image(context, unit, state, image):
     project = context.scene.pm_vr_project
     directory = _output_directory(project.lightmap_output_directory, "Lightmap")
-    suffix = "" if state == 'DAY' else "_Evening"
+    suffix = looks.suffix(project, state)
     final_path = os.path.join(
         directory,
         f"{safe_stem(unit.display_name)}_{unit.artifact_key[:8]}{suffix}_LM.exr",

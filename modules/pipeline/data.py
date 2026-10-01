@@ -1,6 +1,7 @@
 """Persistent PropertyGroups for the semantic production pipeline."""
 
 import bpy
+from . import looks
 
 from .constants import (
     DEBUG_OVERLAY_ITEMS,
@@ -52,10 +53,9 @@ def _layer_type_changed(layer, context):
         for unit in project.bake_units:
             if unit.render_layer_id != layer.layer_id:
                 continue
-            if unit.day_status == "Ready":
-                unit.day_status = "Layer type changed — rebake required"
-            if unit.evening_status == "Ready":
-                unit.evening_status = "Layer type changed — rebake required"
+            for state in looks.result_ids(unit):
+                if looks.result_value(unit, state, 'status') == 'Ready':
+                    looks.set_result(unit, state, status='Layer type changed — rebake required')
 
 
 def _active_layer_changed(project, _context):
@@ -291,7 +291,28 @@ def _is_empty(_self, obj):
     return obj.type == 'EMPTY'
 
 
+class PMVR_LookResult(bpy.types.PropertyGroup):
+    look_id: bpy.props.StringProperty(options={'HIDDEN'})
+    signature: bpy.props.StringProperty(options={'HIDDEN'})
+    image_name: bpy.props.StringProperty(options={'HIDDEN'})
+    status: bpy.props.StringProperty(options={'HIDDEN'})
+    baked_resolution: bpy.props.IntProperty(default=0, options={'HIDDEN'})
+    file: bpy.props.StringProperty(options={'HIDDEN', 'PATH_SUPPORTS_BLEND_RELATIVE'})
+
+
+class PMVR_LightingLook(bpy.types.PropertyGroup):
+    look_id: bpy.props.StringProperty(options={'HIDDEN'})
+    display_name: bpy.props.StringProperty(name='Name', default='Day')
+    is_default: bpy.props.BoolProperty(name='Default', default=False)
+    lighting_collection: bpy.props.PointerProperty(name='Lighting Collection', type=bpy.types.Collection, update=looks.look_updated)
+    world: bpy.props.PointerProperty(name='World', type=bpy.types.World, update=looks.look_updated)
+    bake_enabled: bpy.props.BoolProperty(name='Bake', default=False, update=looks.look_updated)
+    color_settings_json: bpy.props.StringProperty(options={'HIDDEN'})
+    compositor_name: bpy.props.StringProperty(options={'HIDDEN'})
+
+
 class PMVR_BakeVariant(bpy.types.PropertyGroup):
+    look_results: bpy.props.CollectionProperty(type=PMVR_LookResult)
     """A material variant of a bake unit: baked like the unit with its
     material in place of the unit's variant material (see variants.py)."""
 
@@ -312,6 +333,8 @@ class PMVR_BakeVariant(bpy.types.PropertyGroup):
 
 
 class PMVR_BakeUnit(bpy.types.PropertyGroup):
+    beauty_results: bpy.props.CollectionProperty(type=PMVR_LookResult)
+    lightmap_results: bpy.props.CollectionProperty(type=PMVR_LookResult)
     unit_id: bpy.props.StringProperty(name="Unit ID", options={'HIDDEN'})
     display_name: bpy.props.StringProperty(name="Name", default="Bake Unit")
     artifact_key: bpy.props.StringProperty(name="Artifact Key", options={'HIDDEN'})
@@ -401,6 +424,7 @@ class PMVR_BakeScenario(bpy.types.PropertyGroup):
 
 
 class PMVR_BakeQueueEntry(bpy.types.PropertyGroup):
+    completed_looks: bpy.props.CollectionProperty(type=PMVR_LookResult)
     unit_id: bpy.props.StringProperty(name="Unit ID")
     # Baked in this queue: a stopped queue continues with what is left, and
     # the entry leaves the queue once every state of the run is done.
@@ -409,6 +433,7 @@ class PMVR_BakeQueueEntry(bpy.types.PropertyGroup):
 
 
 class PMVR_BuildRecord(bpy.types.PropertyGroup):
+    look_id: bpy.props.StringProperty(options={'HIDDEN'})
     unit_id: bpy.props.StringProperty(name="Unit ID")
     lighting_state: bpy.props.EnumProperty(items=STATE_ITEMS)
     bake_mode: bpy.props.EnumProperty(items=MODE_ITEMS)
@@ -425,20 +450,23 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     project_id: bpy.props.StringProperty(name="Project ID", options={'HIDDEN'})
     working_directory_version: bpy.props.IntProperty(default=0, options={'HIDDEN'})
     legacy_working_directory: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
+    lighting_format_version: bpy.props.IntProperty(default=0, options={'HIDDEN'})
+    lighting_looks: bpy.props.CollectionProperty(type=PMVR_LightingLook)
+    active_look_id: bpy.props.StringProperty(options={'HIDDEN'})
 
     source_root_collection: bpy.props.PointerProperty(name="Source Root", type=bpy.types.Collection)
-    day_lighting_collection: bpy.props.PointerProperty(name="Day Lighting", type=bpy.types.Collection)
-    day_world: bpy.props.PointerProperty(name="Day World", type=bpy.types.World)
-    evening_lighting_collection: bpy.props.PointerProperty(name="Evening Lighting", type=bpy.types.Collection)
-    evening_world: bpy.props.PointerProperty(name="Evening World", type=bpy.types.World)
+    day_lighting_collection: bpy.props.PointerProperty(name="Day Lighting", type=bpy.types.Collection, update=looks.legacy_updated)
+    day_world: bpy.props.PointerProperty(name="Day World", type=bpy.types.World, update=looks.legacy_updated)
+    evening_lighting_collection: bpy.props.PointerProperty(name="Evening Lighting", type=bpy.types.Collection, update=looks.legacy_updated)
+    evening_world: bpy.props.PointerProperty(name="Evening World", type=bpy.types.World, update=looks.legacy_updated)
     active_lighting_state: bpy.props.EnumProperty(
         name="Lighting State",
         items=STATE_ITEMS,
         default='DAY',
-        update=_overlay_updated,
+        update=looks.legacy_active_updated,
     )
-    bake_day: bpy.props.BoolProperty(name="Day", default=True)
-    bake_evening: bpy.props.BoolProperty(name="Evening", default=False)
+    bake_day: bpy.props.BoolProperty(name="Day", default=True, update=looks.legacy_updated)
+    bake_evening: bpy.props.BoolProperty(name="Evening", default=False, update=looks.legacy_updated)
     bake_mode: bpy.props.EnumProperty(
         name="Bake Mode",
         items=MODE_ITEMS,
@@ -607,6 +635,8 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
 
 
 CLASSES = (
+    PMVR_LookResult,
+    PMVR_LightingLook,
     PMVR_ExtraExportLayer,
     PMVR_ObjectMetadata,
     PMVR_RenderLayer,

@@ -1,4 +1,6 @@
-"""Day/Evening activation and LayerCollection path validation."""
+"""Project lighting activation and LayerCollection path validation."""
+
+from . import looks
 
 
 class PipelineStateError(RuntimeError):
@@ -40,21 +42,26 @@ def validate_state_configuration(context):
     project = context.scene.pm_vr_project
     if not project.source_root_collection:
         raise PipelineStateError("Choose Source Root Collection in Project Settings")
-    if not project.day_lighting_collection or not project.evening_lighting_collection:
-        raise PipelineStateError("Choose both Day and Evening lighting collections")
-    if project.day_lighting_collection == project.evening_lighting_collection:
-        raise PipelineStateError("Day and Evening lighting collections must be different")
+    try:
+        looks.validate_names(project)
+    except ValueError as exc:
+        raise PipelineStateError(str(exc)) from exc
     root = project.source_root_collection
-    day = project.day_lighting_collection
-    evening = project.evening_lighting_collection
-    if not collection_contains(root, day) or not collection_contains(root, evening):
-        raise PipelineStateError("Both lighting collections must be inside Source Root")
-    if collection_contains(day, evening) or collection_contains(evening, day):
-        raise PipelineStateError("Day and Evening lighting collections cannot contain one another")
     unique_layer_collection(context.view_layer, root, "Source Root")
-    day_layer, _ = unique_layer_collection(context.view_layer, day, "Day Lighting")
-    evening_layer, _ = unique_layer_collection(context.view_layer, evening, "Evening Lighting")
-    return day_layer, evening_layer
+    configured = []
+    for look in project.lighting_looks:
+        collection = look.lighting_collection
+        if collection is None:
+            raise PipelineStateError(f'Choose the {look.display_name} lighting collection')
+        if not collection_contains(root, collection):
+            raise PipelineStateError('Lighting collections must be inside Source Root')
+        for other in project.lighting_looks:
+            if other.look_id != look.look_id and other.lighting_collection:
+                if collection_contains(collection, other.lighting_collection):
+                    raise PipelineStateError('Lighting collections must differ and cannot contain one another')
+        layer, _ = unique_layer_collection(context.view_layer, collection, look.display_name + ' Lighting')
+        configured.append((look.look_id, layer))
+    return configured
 
 
 def _switch_subtree(layer_collection, exclude):
@@ -70,13 +77,19 @@ def _switch_subtree(layer_collection, exclude):
 
 def activate_state(context, state):
     project = context.scene.pm_vr_project
-    day_layer, evening_layer = validate_state_configuration(context)
-    world = project.day_world if state == 'DAY' else project.evening_world
+    configured = validate_state_configuration(context)
+    look = looks.find(project, state)
+    if look is None:
+        raise PipelineStateError('Lighting look was removed')
+    world = look.world
     if world is None:
-        raise PipelineStateError(f"Choose the {state.title()} World in Project Settings")
-    active, other = (day_layer, evening_layer) if state == 'DAY' else (evening_layer, day_layer)
-    _switch_subtree(other, True)
-    _switch_subtree(active, False)
+        raise PipelineStateError(f"Choose the {look.display_name} World in Project Settings")
+    for look_id, layer in configured:
+        if look_id != state:
+            _switch_subtree(layer, True)
+    _switch_subtree(next(layer for look_id, layer in configured if look_id == state), False)
     context.scene.world = world
-    project.active_lighting_state = state
+    if state in looks.LEGACY:
+        project.active_lighting_state = state
+    project.active_look_id = state
     return state

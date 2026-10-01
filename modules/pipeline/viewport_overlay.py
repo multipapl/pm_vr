@@ -7,6 +7,7 @@ import math
 
 import blf
 import bpy
+from . import looks
 import gpu
 import numpy as np
 from bpy.app.handlers import persistent
@@ -152,24 +153,8 @@ def _is_session_bake(project, unit, state, mode):
 
 
 def _has_result(unit, state, mode):
-    if mode == 'LIGHTMAP':
-        status = (
-            unit.day_lightmap_status
-            if state == 'DAY'
-            else unit.evening_lightmap_status
-        )
-        image_name = (
-            unit.day_lightmap_image
-            if state == 'DAY'
-            else unit.evening_lightmap_image
-        )
-    else:
-        status = unit.day_status if state == 'DAY' else unit.evening_status
-        image_name = (
-            unit.day_beauty_image
-            if state == 'DAY'
-            else unit.evening_beauty_image
-        )
+    status = looks.result_value(unit, state, 'status', mode)
+    image_name = looks.result_value(unit, state, 'image_name', mode)
     return bool(status == "Ready" and image_name and bpy.data.images.get(image_name))
 
 
@@ -354,7 +339,7 @@ def _classify(context, project, obj, layers, units):
     if not unit or unit.render_layer_id != layer.layer_id:
         return 'UNASSIGNED', STATUS_COLORS['UNASSIGNED']
 
-    state = project.active_lighting_state
+    state = looks.active_id(project)
     mode = project.bake_mode
     if not _has_result(unit, state, mode):
         return 'MISSING', STATUS_COLORS['MISSING']
@@ -680,7 +665,7 @@ def _draw_text(x, y, text, color, size=12):
 def _legend_lines(context, project, counts):
     if project.overlay_mode == 'BAKE_STATUS':
         title = (
-            f"Bake Status · {project.active_lighting_state.title()} · "
+            f"Bake Status · {looks.name(project, looks.active_id(project))} · "
             f"{project.bake_mode.title()}"
         )
         entries = []

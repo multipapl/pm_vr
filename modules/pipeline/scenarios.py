@@ -14,6 +14,7 @@ apply the same rule, so switching a parent off always switches off its content.
 import json
 
 import bpy
+from . import looks
 
 from .bake_scene import PipelineBakeError
 from .constants import SCENARIO_NONE
@@ -24,7 +25,7 @@ from .state import (
     collection_paths,
     validate_state_configuration,
 )
-from . import log
+from . import log, looks
 
 
 # The outliner state a running bake started from, mirrored into the .blend so
@@ -74,6 +75,7 @@ class Scope:
     """Layer collections a scenario controls in one View Layer."""
 
     def __init__(self, project, view_layer):
+        looks.ensure(project)
         root = project.source_root_collection
         if not root:
             raise PipelineBakeError("Choose Source Root Collection in Project Settings")
@@ -84,7 +86,7 @@ class Scope:
         self.root_key = tuple(item.collection.name_full for item in paths[0][1:])
         self.lighting = {
             collection.name_full
-            for collection in (project.day_lighting_collection, project.evening_lighting_collection)
+            for collection in (look.lighting_collection for look in project.lighting_looks)
             if collection
         }
         lighting_keys = [
@@ -464,7 +466,7 @@ def preflight(context, unit_ids, states):
     except PipelineBakeError as exc:
         return problems + [str(exc)]
     baseline = scope.baseline()
-    original = project.active_lighting_state
+    original = looks.active_id(project)
     seen = set()
     try:
         for state in states:

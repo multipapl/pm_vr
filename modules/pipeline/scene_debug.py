@@ -1,6 +1,7 @@
 """Interactive controller and UI for viewport diagnostic channels."""
 
 import bpy
+from . import looks
 from bpy.app.handlers import persistent
 
 from . import viewport_overlay
@@ -63,7 +64,7 @@ def draw_controls(layout, context, project):
     if project.overlay_mode in {'BAKE_STATUS', 'RENDER_LAYERS', 'BAKE_UNITS'}:
         box.prop(project, "overlay_show_unassigned", toggle=True)
     if project.overlay_mode == 'BAKE_STATUS':
-        state = project.active_lighting_state.title()
+        state = looks.name(project, looks.active_id(project))
         mode = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
         box.label(text=f"Showing {state} · {mode}", icon='INFO')
     if _operator_running:

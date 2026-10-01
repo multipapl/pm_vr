@@ -1,6 +1,7 @@
 """Generated objects and materials: ownership, processors, state binding and commit."""
 
 import bpy
+from . import looks
 
 from ..lightmap_baker.material import add_lightmap_nodes
 from .bake_scene import (
@@ -324,8 +325,8 @@ def bind_generated_state(unit, state, mode='BEAUTY', strict=False):
         try:
             if not materials:
                 raise PipelineBakeError(
-                    f"{state.title()} {mode.title()} materials are missing; "
-                    f"rebake {state.title()}"
+                    f"{looks.name(bpy.context.scene.pm_vr_project, state)} {mode.title()} materials are missing; "
+                    f"rebake this lighting look"
                 )
             _assign_materials_in_place(obj.data, materials)
         except PipelineBakeError as exc:
@@ -356,11 +357,9 @@ def restore_generated_bindings(snapshot):
 
 
 def _previous_signature(unit, mode):
-    return (
-        (unit.day_signature or unit.evening_signature)
-        if mode == 'BEAUTY'
-        else (unit.day_lightmap_signature or unit.evening_lightmap_signature)
-    )
+    return next((looks.result_value(unit, state, 'signature', mode)
+                 for state in looks.result_ids(unit, mode)
+                 if looks.result_value(unit, state, 'signature', mode)), '')
 
 
 def check_commit(unit, layer, receivers, staged, signature, mode='BEAUTY'):
@@ -520,10 +519,10 @@ def commit_generated_geometry(context, unit, layer, receivers, signature, mode='
         for generated in generated_by_source.values():
             use_bake_uv(generated)
     if mode == 'BEAUTY' and not compatible:
-        if unit.day_signature and not same_structure(unit.day_signature, signature):
-            unit.day_status = "Structurally incompatible — rebake required"
-        if unit.evening_signature and not same_structure(unit.evening_signature, signature):
-            unit.evening_status = "Structurally incompatible — rebake required"
+        for state in looks.result_ids(unit):
+            previous = looks.result_value(unit, state, 'signature')
+            if previous and not same_structure(previous, signature):
+                looks.set_result(unit, state, status='Structurally incompatible — rebake required')
 
 
 def prepare_materials(unit, layer, members, state, image):

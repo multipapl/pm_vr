@@ -17,6 +17,7 @@ import os
 import re
 
 import bpy
+from . import looks
 
 from .bake_scene import same_structure
 from .identity import find_layer, new_id, safe_stem, unit_members
@@ -80,14 +81,11 @@ def variant_problem(project, unit):
 
 
 def variant_file(variant, state):
-    return variant.day_file if state == 'DAY' else variant.evening_file
+    return looks.variant_file(variant, state)
 
 
 def set_result(variant, state, path, signature):
-    if state == 'DAY':
-        variant.day_file, variant.day_signature = path, signature
-    else:
-        variant.evening_file, variant.evening_signature = path, signature
+    looks.set_variant_result(variant, state, path, signature)
 
 
 def variant_status(unit, variant, state):
@@ -95,8 +93,8 @@ def variant_status(unit, variant, state):
     path = variant_file(variant, state)
     if not path or not os.path.exists(bpy.path.abspath(path)):
         return ""
-    signature = variant.day_signature if state == 'DAY' else variant.evening_signature
-    unit_signature = unit.day_signature if state == 'DAY' else unit.evening_signature
+    signature = looks.variant_signature(variant, state)
+    unit_signature = looks.result_value(unit, state, 'signature')
     return "Ready" if signature and unit_signature and same_structure(signature, unit_signature) else "Rebake"
 
 
@@ -107,8 +105,9 @@ def staging_folder(project):
     return folder
 
 
-def model_path(entity, variant, state):
-    suffix = "" if state == 'DAY' else "_Evening"
+def model_path(entity, variant, state, project=None):
+    project = project or bpy.context.scene.pm_vr_project
+    suffix = looks.suffix(project, state)
     return f"{FOLDER}/{entity}_{variant_stem(variant)}{suffix}.usdz"
 
 
@@ -124,7 +123,7 @@ def manifest_entry(unit, entity, staging):
         options[0]["swatch"] = swatch_path(entity)
     ids = {"default"}
     for variant in unit.variants:
-        model = model_path(entity, variant, 'DAY')
+        model = model_path(entity, variant, looks.default_id(bpy.context.scene.pm_vr_project))
         if not os.path.exists(os.path.join(staging, model)):
             continue
         option_id = _slug(variant.title)
