@@ -21,7 +21,7 @@ from .modules import vr_project_tools
 bl_info = {
     "name": "PM VR",
     "author": "multipapl",
-    "version": (2, 0, 0),
+    "version": (2, 0, 1),
     "blender": (5, 2, 0),
     "location": "View3D > N-Panel > PM VR",
     "description": "Internal tools for VR project production",
