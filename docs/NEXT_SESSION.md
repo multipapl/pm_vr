@@ -274,3 +274,33 @@ Corrected both GUI-test backspace paths in run_tests.bat; verified both target s
 - Fresh diagnostic copy captured 19:55:24 +03 from owner's file saved 19:52:30; SHA256 AF47B3E546DB96F7C3EEC3DEE61A6AE140A9472DD60EF22D55AFC9702E4148CB. Only that copy was opened. Production .blend and PNGs were never modified; owner's Blender PID 12020 never controlled.
 - Unit 144 / WoodBedroom02 / WoodBedroom0204 NOT investigated or repaired, per owner instruction.
 - Owner must save and restart/reload Blender after any running bake to activate disk code. For already-baked WoodParquette03, run the guarded repair script in his Text Editor, inspect and save himself. Updating addon code alone does not retroactively repair saved UVs.
+
+## v3 implementation authorized — reference and stage 1 checkpoint (2026-10-01)
+
+Owner explicitly said to start all agreed Blender v3 work, test independently and resume automatically after five-hour limits reset. Do not ask again. Mac handoff reviewed completely: shared guide updated 21:19:18 +03, SHA256 36AD8ADA93FF89E08A0CEADE10BED6BB750291DD51CDF139124E2C8ABDF0D693. Current Mac is ready; sections 0–15 contract, section17 implementation status. Local review notes/copy in D:/Blender_Python_v3/_environment/.
+
+### Reference snapshot
+- Production saved 2026-10-01 21:44:23 +03 after queue completed 21:41:27 (10 ready, 0 skipped, 0 failed). Only READ/copy of production.
+- Captured 21:48:01 +03: C:/Users/papl/Desktop/PMVR_v3_test/Uniplace_v2_reference_2026-10-01.blend; 192115112 bytes; SHA256 E0044DA7E477F679E55572E535DF36B2BCDDE40E0DFBFF7BFB16877B3381A97B.
+- Existing snapshot Beauty_Bakes refreshed via non-destructive file copying: 1006 files, 12.999 GiB; 271 changed/new files copied, 4.456 GiB. PMVR_Flattened similarly refreshed. Textures/assets not copied.
+- Detached v2.0.0 reference checkout: D:/Blender_Python_v2_reference/addons/PM_VR (e985768). Production main stayed v2.0.1, untouched.
+- tests/blender_reference_snapshot.py opens ONLY file copies inside test-root; remaps images/libraries/clips/sounds/fonts/cache files, variant paths, modifier cache inputs and output folders. Referenced Sync inputs copied locally as needed. Audits against production Beauty_Bakes/PMVR_Flattened/UniPlace_Sync BEFORE export.
+- Isolated saved copy: Uniplace_v2_reference_isolated.blend; 1930 paths audited. Evidence reference_isolation.json and v3_reference_snapshot.json in snapshot.
+- Full v2.0.0 Day/Evening + Variants baseline RUNNING to Sync_v2/USD; log D:/Blender_Python_v3/_environment/reference_export.log. First Day LO_Unlit (202 objects) and KitchenMarble Stone variant exported. Confirm final PMVR_REFERENCE_EXPORT_OK and reference_export.json before marking stage0 complete. Current tool exec session95560; if unavailable inspect log and owned process command line, NEVER terminate owner's Blender.
+- Command: factory-startup/background/threads2/python-exit-code1 + tests/blender_reference_snapshot.py; args addon-parent D:/Blender_Python_v2_reference/addons, source-root original UniPlace, copy raw reference blend, test-root snapshot, --export. Isolated user config/temp; PYTHONDONTWRITEBYTECODE=1.
+
+### Stage 1 in preparation
+- Existing first v3 commit fixed GUI backspaces and tracked tests. New uncommitted log.py adds actual Git worktree commit to environment line; missing/slow Git safely reports unknown. Changelog updated.
+- New tests/blender_environment_smoke.py PASSED on Blender5.2.2: actual b6db1479108f commit, version2.0.1, persisted log; missing Git and timeout tested. Evidence _environment/stage1_environment_test.log.
+- Full background/GUI suites still required at relevant stage; do not confuse one passing test with whole suite.
+- Keep separate commits per agreed stage. Reference tool/docs are stage0; log.py/environment test/changelog are stage1. No stage2/looks/probes/PBR implementation yet.
+
+### Resume and next work
+- Heartbeat automation id pm-vr-v3 ACTIVE every30minutes in THIS thread, explicitly requested to resume after usage reset. Use ordinary limits, do not consume reset credits. Remain quiet if unchanged; notify only meaningful completion/problem. Disable automation when implementation is done.
+- Stage2: exact per-look schema1 export descriptors with complete lists/atomic update/stale layer pruning; export-time original properties context; Glass authored opacity; human variant group title; Runtime warning-only validation.
+- Stage3: new-project PMVR folders, pin legacy paths explicitly, preserve UniPlace folders.
+- Stage4: arbitrary looks + migration with DAY/EVENING IDs and dual-writing legacy fields for rollback. Preserve ALL signatures/inputs and SCHEMA_VERSION. Compare actual recorded USDZ to baseline using pxr and packaged texture hashes.
+- Stage5: configured probe camera collection, all looks, world-aligned Half RGB ZIP EXR, local JPEG previews. Stage6: PBR diffuse-only switch defaults OFF per explicit prompt; Mac ready, enable on isolated test only and prove old/new atlas difference. Stage7: Runtime and post-bake rules in ?.
+- Runtime renaming/zones in UniPlace and cleanup of UI/lightmap/margin-type changes OUT OF SCOPE; owner handles scene authoring.
+- No original scene, Sync, preferences or running owner Blender changes. No main merge/publish until acceptance. GPU only if fresh production log + nvidia-smi prove idle.
+- Separate new project still unavailable; do not ask path until ready, file backup before first v3 opening.
