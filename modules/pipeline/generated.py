@@ -365,8 +365,6 @@ def _previous_signature(unit, mode):
 
 def check_commit(unit, layer, receivers, staged, signature, mode='BEAUTY'):
     """Reject an uncommittable result before any artifact is replaced."""
-    previous_signature = _previous_signature(unit, mode)
-    compatible = not previous_signature or same_structure(previous_signature, signature)
     collapse_to_one = mode == 'BEAUTY' and layer.layer_type in UNLIT_LAYER_TYPES
     for receiver in receivers:
         source = receiver["source"]
@@ -374,8 +372,9 @@ def check_commit(unit, layer, receivers, staged, signature, mode='BEAUTY'):
         materials = staged.get(source_id)
         if not materials:
             raise PipelineBakeError(f'{source.name}: no output materials were prepared')
-        generated = find_generated(unit.unit_id, source_id, mode)
-        mesh = generated.data if generated and compatible else receiver["mesh"]
+        # Every successful rebake publishes the evaluated receiver mesh.
+        # Validate that new mesh before replacing the previous PNG/result.
+        mesh = receiver["mesh"]
         if not collapse_to_one and len(mesh.materials) != len(materials):
             raise PipelineBakeError(
                 f'{source.name}: evaluated mesh has {len(mesh.materials)} '
@@ -462,15 +461,16 @@ def commit_generated_geometry(context, unit, layer, receivers, signature, mode='
         source = receiver["source"]
         source_id = source.pm_vr_pipeline.source_id
         generated = find_generated(unit.unit_id, source_id, mode)
-        if generated and compatible:
-            continue
         if generated:
             old_mesh = generated.data
+            mesh_name = old_mesh.name
             new_mesh = receiver["mesh"].copy()
-            new_mesh.name = f"PMVR_{safe_stem(source.name)}_{unit.unit_id[:8]}"
             generated.data = new_mesh
             if old_mesh.users == 0:
                 bpy.data.meshes.remove(old_mesh)
+            # USD mesh prims include this name. Rename after releasing the
+            # old datablock, avoiding a .001 suffix on every rebake.
+            new_mesh.name = mesh_name
         else:
             new_mesh = receiver["mesh"].copy()
             new_mesh.name = f"PMVR_{safe_stem(source.name)}_{unit.unit_id[:8]}"
