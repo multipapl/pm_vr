@@ -186,8 +186,8 @@ def main():
     for node in (geometry, mix, noise, lone, other):
         material.node_tree.nodes.remove(node)
     check(len(material.node_tree.nodes) == count, "a refusal changed the material")
-    check(not os.path.isdir(os.path.join(folder, "PMVR_Flattened"))
-          or not os.listdir(os.path.join(folder, "PMVR_Flattened")), "a refusal wrote files")
+    check(not os.path.isdir(os.path.join(folder, "PMVR", "Flattened"))
+          or not os.listdir(os.path.join(folder, "PMVR", "Flattened")), "a refusal wrote files")
 
     # Flatten both chains in one go.
     selected = [n["base"], n["ramp"], n["hsv"], n["tint"], n["rough"], n["power"]]
@@ -208,7 +208,7 @@ def main():
         check(tuple(node.image.size) == (64, 64), f"{node.image.name} is {tuple(node.image.size)}, expected 64")
         check(node.inputs["Vector"].links and node.inputs["Vector"].links[0].from_node == n["mapping"],
               f"{node.image.name} lost the Mapping (tiling)")
-        check(node.image.filepath.startswith("//PMVR_Flattened"), f"image path {node.image.filepath}")
+        check(node.image.filepath.replace('\\', '/').startswith("//PMVR/Flattened"), f"image path {node.image.filepath}")
 
     after_colour = bake_pass(material, 'DIFFUSE', pass_filter={'COLOR'})
     after_rough = bake_pass(material, 'ROUGHNESS')

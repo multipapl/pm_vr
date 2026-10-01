@@ -15,9 +15,8 @@ import numpy
 
 from .lightmap_baker.images import temporary_scene
 from .pipeline.bake_files import scaled_linear
+from .pipeline.working_directory import flattened_directory
 
-
-OUTPUT_FOLDER = "//PMVR_Flattened"
 
 # Nodes whose result depends on the object's surface, the view or the light
 # path: a UV-space texture cannot hold them.
@@ -146,10 +145,10 @@ def _label(material, links):
 
 
 def _output_path(label, taken):
-    """A new file in PMVR_Flattened next to the .blend; never overwrites."""
+    """A new file in the project's Flattened folder; never overwrites."""
     if not bpy.data.filepath:
         raise FlattenError("Save the .blend first: the texture is written next to it")
-    folder = bpy.path.abspath(OUTPUT_FOLDER)
+    folder = bpy.path.abspath(flattened_directory())
     os.makedirs(folder, exist_ok=True)
     stem = bpy.path.clean_name(label)
     path = os.path.join(folder, f"{stem}.png")

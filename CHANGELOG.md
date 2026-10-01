@@ -2,6 +2,7 @@
 
 ## v3 development
 
+- New projects initialize PMVR/Bakes, Flattened, Logs and ProbePreviews; legacy projects retain their existing folders and explicit defaults.
 - USDZ exports write atomic per-look descriptions, retaining other current files during partial exports and removing stale layer entries.
 - Export uses current source object properties, including Glass opacity, without rebaking or changing stored generated objects.
 - Material variant groups have an optional display title; IDs and filenames stay stable.

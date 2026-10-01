@@ -40,7 +40,7 @@ from .identity import (
 )
 from .state import PipelineStateError, activate_state
 from .validation import validate_all
-from . import log
+from . import log, working_directory
 
 
 SUPPORTED_RESOLUTIONS = tuple(int(item[0]) for item in RESOLUTION_ITEMS)
@@ -315,8 +315,10 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
 
     def execute(self, context):
         project = context.scene.pm_vr_project
+        working_directory.initialize(project)
         ensure_project_id(project)
         project.schema_version = SCHEMA_VERSION
+        working_directory.ensure_new_folders(project)
         if not project.render_layers:
             for name, layer_type in (
                 ("Unlit", 'UNLIT'),
@@ -1218,6 +1220,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         bake.prop(project, "cycles_samples")
         bake.prop(project, "beauty_output_directory")
         bake.prop(project, "lightmap_output_directory")
+        bake.prop(project, "flattened_output_directory")
         export = layout.box()
         export.label(text="Export", icon='EXPORT')
         export.prop(project, "usdz_output_directory")
@@ -1225,8 +1228,10 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         probes = layout.box()
         probes.label(text="Probes", icon='WORLD')
         probes.prop(project, "probe_output_directory")
+        probes.prop(project, "probe_preview_directory")
         probes.prop(project, "probe_width")
         log_box = layout.box()
+        log_box.prop(project, "log_output_directory")
         log_box.label(text="Log", icon='TEXT')
         log_box.label(text=log.log_file_path())
         log_box.operator("pmvr.open_log_folder", icon='FILEBROWSER')

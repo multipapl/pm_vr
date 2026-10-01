@@ -27,9 +27,12 @@ The View3D sidebar is organized as four stages:
 Global source-root, lighting collections, worlds, bake defaults, and output
 directories live in **Project Settings** (the gear button in the panel header).
 The `?` button next to it lists the naming and scene rules the pipeline relies on.
-Bake, export, validation and Setup changes are logged to
-`PMVR_Logs/<blend name>_<date>.log` next to the `.blend` (in the system temp
-folder while the file is unsaved). Every line is written immediately, so the log
+New projects create `PMVR/Bakes`, `Flattened`, `Logs` and `ProbePreviews` beside
+the saved `.blend` during Initialize (or its first save). Existing projects keep
+their configured paths, including implicit legacy `Beauty_Bakes`,
+`PMVR_Flattened` and `PMVR_Logs`; loading never moves their files.
+Bake, export, validation and Setup changes are logged to the project's Logs
+folder (in the system temp folder while the file is unsaved). Every line is written immediately, so the log
 survives a crash; Project Settings shows the path and opens the folder. The last
 500 lines are also kept in the **PMVR Pipeline Log** text inside the `.blend`.
 
@@ -97,7 +100,7 @@ in the main scene and has no file.
 **Flatten to Texture** (Shader Editor, right-click or the Node menu) turns
 selected nodes, such as an image through Color Ramp, Hue/Saturation or Math,
 into one Image Texture: the selection is rendered texel by texel and saved as
-a PNG in `PMVR_Flattened` next to the .blend. The dialog asks for the long side,
+a PNG in the project's Flattened folder. The dialog asks for the long side,
 the largest image's by default; the other side keeps its aspect ratio, and a
 smaller size averages the texels down (an oversized 4K roughness can become 1K)
 (sRGB into colour inputs, Non-Color into values and normal maps). Coordinates

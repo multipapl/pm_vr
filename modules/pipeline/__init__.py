@@ -19,11 +19,13 @@ from . import (
     ui,
     variants,
     viewport_overlay,
+    working_directory,
 )
 
 
 @persistent
 def _load_post(_filepath):
+    working_directory.migrate_all()
     # Files saved by earlier versions may hold generated state materials
     # without a fake user; protect them before the next save drops them.
     generated.protect_all_generated_materials()
@@ -48,6 +50,14 @@ def _load_post(_filepath):
     setup_ops.reset_test_resolution()
     scenarios.prune_scenarios()
     scenarios.sync_scenarios(force=True)
+
+
+@persistent
+def _save_post(_filepath):
+    for scene in bpy.data.scenes:
+        project = getattr(scene, 'pm_vr_project', None)
+        if project is not None:
+            working_directory.ensure_new_folders(project)
 
 
 def _settle_generated_uvs():
@@ -86,6 +96,7 @@ def _undo_redo_post(*_args):
 
 _HANDLERS = (
     ("load_post", _load_post),
+    ("save_post", _save_post),
     ("depsgraph_update_post", _depsgraph_update_post),
     ("undo_post", _undo_redo_post),
     ("redo_post", _undo_redo_post),
@@ -104,6 +115,7 @@ def register():
         if handler not in handlers:
             handlers.append(handler)
     try:
+        working_directory.migrate_all()
         identity.remember_identity_owners()
         generated.protect_all_generated_materials()
         _settle_generated_uvs()

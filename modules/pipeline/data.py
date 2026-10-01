@@ -423,6 +423,8 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     schema_version: bpy.props.IntProperty(name="Schema Version", default=1, min=1)
     initialized: bpy.props.BoolProperty(name="Project Initialized", default=False)
     project_id: bpy.props.StringProperty(name="Project ID", options={'HIDDEN'})
+    working_directory_version: bpy.props.IntProperty(default=0, options={'HIDDEN'})
+    legacy_working_directory: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
 
     source_root_collection: bpy.props.PointerProperty(name="Source Root", type=bpy.types.Collection)
     day_lighting_collection: bpy.props.PointerProperty(name="Day Lighting", type=bpy.types.Collection)
@@ -554,15 +556,19 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         default='4096',
         update=_overlay_updated,
     )
-    beauty_output_directory: bpy.props.StringProperty(name="Beauty Directory", subtype='DIR_PATH', default="//Beauty_Bakes/")
-    lightmap_output_directory: bpy.props.StringProperty(name="Lightmap Directory", subtype='DIR_PATH', default="//Lightmaps/")
-    usdz_output_directory: bpy.props.StringProperty(name="USDZ Directory", subtype='DIR_PATH', default="//USDZ/")
-    glb_output_directory: bpy.props.StringProperty(name="GLB Directory", subtype='DIR_PATH', default="//GLB/")
+    beauty_output_directory: bpy.props.StringProperty(name="Beauty Directory", subtype='DIR_PATH', default="//PMVR/Bakes/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    flattened_output_directory: bpy.props.StringProperty(name="Flattened Directory", subtype='DIR_PATH', default="//PMVR/Flattened/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    log_output_directory: bpy.props.StringProperty(name="Log Directory", subtype='DIR_PATH', default="//PMVR/Logs/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    probe_preview_directory: bpy.props.StringProperty(name="Probe Preview Directory", subtype='DIR_PATH', default="//PMVR/ProbePreviews/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    lightmap_output_directory: bpy.props.StringProperty(name="Lightmap Directory", subtype='DIR_PATH', default="//Lightmaps/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    usdz_output_directory: bpy.props.StringProperty(name="USDZ Directory", subtype='DIR_PATH', default="//USDZ/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    glb_output_directory: bpy.props.StringProperty(name="GLB Directory", subtype='DIR_PATH', default="//GLB/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     probe_output_directory: bpy.props.StringProperty(
         name="Probe Directory",
         description="Where Render Probes writes its EXR panoramas; empty: a probes folder next to the USDZ folder",
         subtype='DIR_PATH',
         default="",
+        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
     )
     probe_width: bpy.props.EnumProperty(
         name="Probe Size",

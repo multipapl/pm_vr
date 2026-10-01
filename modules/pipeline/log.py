@@ -20,7 +20,13 @@ MAX_LINES = 500
 def log_file_path():
     blend = bpy.data.filepath
     if blend:
-        directory = os.path.join(os.path.dirname(blend), LOG_DIRECTORY)
+        project = getattr(bpy.context.scene, 'pm_vr_project', None)
+        if project is not None:
+            from .working_directory import migrate
+            migrate(project)
+            directory = bpy.path.abspath(project.log_output_directory)
+        else:
+            directory = os.path.join(os.path.dirname(blend), LOG_DIRECTORY)
         stem = os.path.splitext(os.path.basename(blend))[0]
     else:
         directory = os.path.join(tempfile.gettempdir(), LOG_DIRECTORY)
