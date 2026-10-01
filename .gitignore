@@ -2,6 +2,4 @@ __pycache__/
 *.pyc
 .vscode/
 
-tests/
-run_tests.bat
 _ref/

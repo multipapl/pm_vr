@@ -201,3 +201,60 @@ The user's SimpleBake habit, automated: bake decides the light, export decides t
 - 8192 removed everywhere (pipeline and legacy Lightmap Baker); stored enum value 5 is capped to 4096 on load/register (`cap_removed_resolutions`).
 - The ÷2/×2 buttons rewrote every queued unit's Setup resolution, with no way back. Replaced by `project.test_resolution` (100/75/50/25%, reset to 100% on load): the test share scales only what the queue bakes (now `bake_size()`, a share of the Bake Resolution). Units record `day/evening_baked_resolution`; the unit status shows a result below Setup and export warns about it.
 - Regression: `tests/blender_resolution_smoke.py` (real 25% bake writes a 64 px PNG for a 256 unit, Setup unchanged, export warning, 100% rebake clears it, reopen resets).
+
+
+## v3 environment prepared — 2026-10-01 (environment only)
+
+Owner authorized preparation only. No addon implementation changes until his explicit command. He is currently rebaking 18 UniPlace units; do not operate his existing Blender process.
+
+### Git and code isolation
+
+- Production: D:\Blender_Python\addons\PM_VR remains main at e985768298206f98bca90c7f435f2ffab846c7e3, clean.
+- Tag v2.0.0 created at that commit and pushed to origin.
+- Worktree: D:\Blender_Python_v3\addons\PM_VR, branch v3, pushed and tracking origin/v3. Initial addon version remains 2.0.0; SCHEMA_VERSION remains 1.
+- Compared all 59 tracked files before adding this note: zero content differences. core.autocrlf=true explains 31 CRLF/LF differences only.
+- All 34 test files and run_tests.bat copied byte-for-byte from production. Tests remain ignored. The GUI-path backspace bug is deliberately unchanged: FIRST v3 code commit must fix it and track tests.
+- This preparation note remains uncommitted until that first authorized code commit. Production docs were not edited.
+
+### Separate Blender launch
+
+- Launcher: D:\Blender_Python_v3\Blender_v3.bat. Uses the same installed Blender 5.2.2 LTS executable, with BLENDER_USER_CONFIG=D:\Blender_Python_v3\_blender_config and TEMP/TMP in the separate _temp.
+- Copied userpref.blend from APPDATA Blender\5.2\config. Changed ONLY the copied preferences: Script Directory D:\Blender_Python\ -> D:\Blender_Python_v3 and temporary_directory -> isolated _temp.
+- Original preference SHA256 remained 02867EFFA0D18F766E5FC3EEFB72A91BC207F367FFEFF83E5B246472B941E2CD. Immutable backup: D:\Blender_Python_v3\_environment\userpref_original.blend. Never publish preference files: they may contain private addon settings.
+- Preserved 42 enabled-addon preference entries and OptiX: RTX 3090 enabled, Ryzen CPU disabled.
+- Copied PM_Tools_Extension and pm_tools_v2 into the v3 Script Directory, excluding .git and caches. Third-party installed addons in APPDATA remain shared for reading; do not update/install/uninstall them for PM VR preparation.
+- Startup.blend and recent-file history not copied; starts with an empty scene. Use this launcher for the future new-project acceptance after backup; do not open production UniPlace with it.
+- Empty background startup VERIFIED actual PM_VR module at D:\Blender_Python_v3\addons\PM_VR\__init__.py, registered properties, isolated config, unchanged saved GPU/addon settings. No project, render, bake, export or GUI window opened.
+- Graphics-dependent third-party addons complain headlessly (UVPackmaster GPU drawing context; Sweep Modifier registration/unregistration). Their preferences were preserved, not disabled or patched. GUI launch was not exercised during the owner's bake.
+
+### Verification tools and evidence
+
+- Reports in D:\Blender_Python_v3\_environment\: environment.json, preferences_setup.json, startup_verification.json, isolation_verification.json.
+- Private verification Python: D:\Blender_Python_v3\_verification_python\Scripts\python.exe. Verified imports: Python 3.13.13, NumPy 2.3.4, USD 0.26.3, Pillow 12.3.0.
+- Virtual environment reads Blender's installed packages; Pillow installed ONLY in the virtual environment. Private sitecustomize.py points DLL lookup at installed Blender's blender.shared (Blender's original derives an incorrect path inside a venv). Installed Blender/Python files unchanged.
+- Versions report: _environment\python_dependencies.json. Pillow pinned in verification_requirements.txt. No full addon test suite or GUI tests run during preparation.
+- User's Blender PID 12020 was never controlled, closed or restarted. Production bake activity and GPU load were observed read-only.
+
+### Snapshot and earlier recovery
+
+- Existing snapshot REUSED, not replaced while production bakes: C:\Users\papl\Desktop\PMVR_v3_test. Copied 2026-10-01 16:36:57 +03 from file saved 12:54:44; own Beauty_Bakes and PMVR_Flattened.
+- Raw Uniplace.blend SHA256: E727608D7F02ED2D36708045F1844BBB3AE525F185FC6ABE930B67F12585A455. Its paths are still production paths: NEVER OPEN IT FOR BAKE/EXPORT.
+- Isolated copy: Diagnostics_2026-10-01\Uniplace_recovered.blend. Previous script audit confirmed no references to production Beauty_Bakes, PMVR_Flattened or UniPlace_Sync. Source textures/assets are absolute read-only references, not copied.
+- Earlier fix: 153 stale Day image links corrected; two proven lost Day records restored (Unit 135 / SofaKiitchenSeat); no rebake or signature algorithm changes. Owner confirmed the fix. KitchenMarble.002 / Holes had a separate missing-unit blocker; owner said he would fix it. Recheck in the fresh saved copy after the 18 rebakes.
+- Temporary diagnostic exports, intermediate/history blends, scripts/logs (~3.81 GiB) moved to Recycle Bin at owner's request. Recovered copy, restore script/dependencies, concise proofs and detailed record remain: Diagnostics_2026-10-01\NEXT_SESSION.md.
+- Created EMPTY Sync_v2, Sync_v3 and NewProject_backup inside the snapshot. NO full baseline yet; earlier 26 diagnostic USDZ outputs were incomplete and removed.
+
+### Next steps after owner commands implementation
+
+1. After the 18 rebakes finish AND owner saves, obtain a consistent fresh file and changed bake artifacts by plain file copying into the test area; keep provenance. Never background-open production .blend.
+2. Isolate/audit ALL paths in that fresh copy before any export: no image/library/movie/sound/font/cache/output reference may write to production Beauty_Bakes, PMVR_Flattened or UniPlace_Sync.
+3. Export full v2 baseline to Sync_v2: all layers, Day and Evening, plus Variants. Recheck KitchenMarble.002 blocker rather than assume its current state.
+4. First v3 code commit fixes run_tests.bat and tracks tests. Follow agreed stages; keep signature_for_receivers, same_structure, all signature inputs, SCHEMA_VERSION, DAY/EVENING IDs and legacy fields (double-write) compatible.
+5. GPU jobs only after independently confirming production idle via newest PMVR log and nvidia-smi. Elapsed time does not authorize operating owner's Blender.
+6. New separate project is not ready; get its path and back up to NewProject_backup before first v3 opening when it becomes available. No need to ask now.
+7. Re-read CURRENT authoritative contract because Mac implementation is underway: F:\CURRENT_PROJECTS\SUBURBIA\UniversityPlace\02_3d\UniPlace\UniPlace_Sync\PMVR_правила_платформи.md. Coordinate Runtime/PBR activation; no production switch or main merge before owner accepts v3.
+
+
+### First v3 commit: test harness only — 2026-10-01
+
+Corrected both GUI-test backspace paths in run_tests.bat; verified both target scripts exist and no backspace remains. Tracked the 34 existing test scripts and runner; removed their ignore rules. Included earlier environment preparation notes. No v3 feature implementation. Next: merge the separately tested urgent v2.0.1 rebake hotfix from main, as owner requested for production v2.
