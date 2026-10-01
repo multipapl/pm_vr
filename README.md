@@ -77,6 +77,14 @@ New units receive an initial 1K/2K/4K resolution suggestion (4K at most) from th
 `SimpleBake` UV channel and the project texel-density target. Missing or invalid
 second UV channels safely fall back to the configured default resolution.
 
+**PBR Diffuse Only** in Project Settings is off by default, preserving the
+Combined bake used by v2. Enable it for the new app shader: PBR atlases contain
+diffuse direct/indirect lighting and colour, without receiver reflections,
+transmission or emission. Other layer types keep their existing bake. Original
+Metallic, Roughness, Normal, Coat and Emission remain in the exported material
+on `UVMap`. Changing this switch requires rebaking affected PBR units in every
+look; existing atlases are retained until you choose to rebake.
+
 Bake and delivery sizes are separate, like SimpleBake's bake and output sizes.
 Every unit bakes and is denoised at the **Bake Resolution** (Project Settings,
 4096 by default; a unit set higher bakes at its own), and its PNG keeps that

@@ -2,6 +2,7 @@
 
 ## v3 development
 
+- Optional PBR Diffuse Only bake (default off) excludes receiver highlights and emission, preserving original exported PBR channels and all compatibility signatures.
 - Probe cameras come from a configured collection, including nested cameras of any type; legacy Probes is selected automatically.
 - Render Probes covers every lighting look, writes world-aligned RGB Half ZIP EXRs and local JPEG previews from the same render.
 - Runtime exports represent probes as Empties at their world positions; original cameras are restored even on export failure.

@@ -545,6 +545,12 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
         precision=4,
     )
     cycles_samples: bpy.props.IntProperty(name="Samples", default=256, min=1, soft_max=2048)
+    pbr_diffuse_only: bpy.props.BoolProperty(
+        name="PBR Diffuse Only",
+        description=("PBR atlas contains only diffuse lighting and colour, without reflections or emission. "
+                     "For the new app shader; rebake affected PBR units in every look after changing this"),
+        default=False,
+    )
     fill_empty_uv: bpy.props.BoolProperty(
         name="Fill Empty UV Space",
         description=(

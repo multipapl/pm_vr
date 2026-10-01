@@ -64,6 +64,21 @@ def rewrite(owner, field):
 for collection in ('libraries', 'images', 'movieclips', 'sounds', 'fonts', 'cache_files'):
     for item in getattr(bpy.data, collection):
         rewrite(item, 'filepath')
+
+# bpy.utils.blend_paths omits external shader node files (notably IES).
+# Include embedded light/world/material trees and shared nested node groups.
+trees = {tree.as_pointer(): tree for tree in bpy.data.node_groups}
+for collection in ('materials', 'worlds', 'lights', 'scenes'):
+    for item in getattr(bpy.data, collection):
+        tree = getattr(item, 'node_tree', None)
+        if tree:
+            trees[tree.as_pointer()] = tree
+node_paths = []
+for tree in trees.values():
+    for node in tree.nodes:
+        if hasattr(node, 'filepath') and node.filepath:
+            rewrite(node, 'filepath')
+            node_paths.append(node)
 for scene in bpy.data.scenes:
     project = scene.pm_vr_project
     for field, folder in (('beauty_output_directory', 'Beauty_Bakes'),
@@ -96,6 +111,10 @@ for obj in bpy.data.objects:
 
 def audit():
     paths = list(bpy.utils.blend_paths(absolute=True, packed=False))
+    paths.extend(node.filepath for node in node_paths)
+    for node in node_paths:
+        if node.type == 'TEX_IES' and node.mode == 'EXTERNAL':
+            assert Path(bpy.path.abspath(node.filepath)).is_file(), ('Missing IES', node.filepath)
     for scene in bpy.data.scenes:
         project = scene.pm_vr_project
         for field in ('beauty_output_directory', 'lightmap_output_directory',

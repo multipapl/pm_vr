@@ -128,6 +128,7 @@ class BeautyBakeRuntime:
         self.snapshot = None
         self.context_state = None
         self.config = None
+        self.diffuse_only = False
         self.work_collection = None
         self.created_materials = []
         self.warnings = []
@@ -228,8 +229,11 @@ class BeautyBakeRuntime:
             'DIRECT', 'INDIRECT', 'COLOR', 'DIFFUSE',
             'GLOSSY', 'TRANSMISSION', 'EMIT',
         }
+        self.diffuse_only = self.layer.layer_type == 'PBR' and self.project.pbr_diffuse_only
+        self.bake_type = 'DIFFUSE' if self.diffuse_only else 'COMBINED'
+        passes = {'DIRECT', 'INDIRECT', 'COLOR', 'DIFFUSE'} if self.diffuse_only else all_passes
         self.config = BakeConfigurationSnapshot(self.context.scene)
-        self.config.configure('COMBINED', self.margin, False, all_passes)
+        self.config.configure(self.bake_type, self.margin, False, passes)
         log.info(
             "Beauty",
             f'Start {looks.name(self.project, self.state)} unit "{self.unit.display_name}"'
@@ -239,7 +243,7 @@ class BeautyBakeRuntime:
             + (f' (test {test_resolution_label(self.project)})' if test_resolution_label(self.project) else '')
             + f', exports at {self.resolution}px'
             + (f' (Setup {self.unit.resolution}px)' if self.resolution != int(self.unit.resolution) else '')
-            + f', margin {self.margin}px, {self.project.cycles_samples} samples',
+            + f', margin {self.margin}px, {self.project.cycles_samples} samples, {self.bake_type}',
         )
         return "READY"
 
@@ -250,7 +254,7 @@ class BeautyBakeRuntime:
         select_only(self.context, receiver["object"])
         _show_bake_stage(
             self.operator,
-            f"Combined {index + 1}/{len(self.receivers)} — {receiver['source'].name}",
+            f"{self.bake_type.title()} {index + 1}/{len(self.receivers)} — {receiver['source'].name}",
             index + 1,
             len(self.receivers) + 3,
         )
@@ -258,8 +262,8 @@ class BeautyBakeRuntime:
 
     def bake_kwargs(self):
         bake = self.context.scene.render.bake
-        return supported_bake_kwargs({
-            "type": 'COMBINED',
+        values = {
+            "type": self.bake_type,
             "use_clear": False,
             "target": 'IMAGE_TEXTURES',
             "margin": self.margin,
@@ -268,7 +272,10 @@ class BeautyBakeRuntime:
             "normal_r": bake.normal_r,
             "normal_g": bake.normal_g,
             "normal_b": bake.normal_b,
-        })
+        }
+        if self.diffuse_only:
+            values['pass_filter'] = {'DIRECT', 'INDIRECT', 'COLOR'}
+        return supported_bake_kwargs(values)
 
     def _denoise_guided(self, label):
         """Denoise (Project Settings) Guided: bake albedo (Diffuse Color)

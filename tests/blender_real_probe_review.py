@@ -34,6 +34,19 @@ for field, folder in (('beauty_output_directory', 'Bakes'), ('lightmap_output_di
                       ('log_output_directory', 'PMVR/Logs'), ('flattened_output_directory', 'PMVR/Flattened')):
     setattr(project, field, str(output / folder))
 paths = list(bpy.utils.blend_paths(absolute=True, packed=False))
+trees = {tree.as_pointer(): tree for tree in bpy.data.node_groups}
+for collection in ('materials', 'worlds', 'lights', 'scenes'):
+    for item in getattr(bpy.data, collection):
+        tree = getattr(item, 'node_tree', None)
+        if tree:
+            trees[tree.as_pointer()] = tree
+for tree in trees.values():
+    for node in tree.nodes:
+        if hasattr(node, 'filepath') and node.filepath:
+            assert not node.filepath.startswith('//'), node.filepath
+            paths.append(node.filepath)
+            if node.type == 'TEX_IES' and node.mode == 'EXTERNAL':
+                assert Path(node.filepath).is_file(), node.filepath
 for unit in project.bake_units:
     for variant in unit.variants:
         paths.extend([variant.day_file, variant.evening_file, *(x.file for x in variant.look_results)])

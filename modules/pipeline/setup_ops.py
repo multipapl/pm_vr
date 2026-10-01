@@ -1222,6 +1222,9 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         bake.prop(project, "uv_padding")
         bake.prop(project, "fill_empty_uv")
         bake.prop(project, "beauty_denoise")
+        mode = bake.row()
+        mode.enabled = not project.operation_running
+        mode.prop(project, "pbr_diffuse_only")
         bake.prop(project, "bake_autosave_minutes", text="Save During Bake (min)")
         bake.prop(project, "cycles_samples")
         bake.prop(project, "beauty_output_directory")
