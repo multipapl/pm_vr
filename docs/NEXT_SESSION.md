@@ -304,3 +304,10 @@ Owner explicitly said to start all agreed Blender v3 work, test independently an
 - Runtime renaming/zones in UniPlace and cleanup of UI/lightmap/margin-type changes OUT OF SCOPE; owner handles scene authoring.
 - No original scene, Sync, preferences or running owner Blender changes. No main merge/publish until acceptance. GPU only if fresh production log + nvidia-smi prove idle.
 - Separate new project still unavailable; do not ask path until ready, file backup before first v3 opening.
+
+### Stage 1 verification completed — 2026-10-01 21:57 +03
+
+- Background run_tests.bat: 26/26 PASS, exit0. Includes environment/worktree commit logging, real rebake geometry regression, pipeline/visibility/USD UV/variants/probes/denoise/flatten/material/lightmap and UI smoke tests.
+- Evidence D:/Blender_Python_v3/_environment/stage1_background_suite.log. Dedicated environment test evidence stage1_environment_test.log.
+- GUI cases still to run (in owned Blender processes), especially the two formerly invalid autosave/Image Editor paths; repeat GUI validation after look UI changes.
+- Reference v2.0.0 export remains in progress: full Day completed through Runtime with no failures; Evening underway. Code changes do not affect the detached v2.0.0 reference checkout.

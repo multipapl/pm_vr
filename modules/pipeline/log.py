@@ -3,6 +3,8 @@ next to the .blend that survives a crash."""
 
 from datetime import datetime
 import os
+from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -99,7 +101,30 @@ def environment(context):
     except (KeyError, AttributeError):
         backend, gpus = "?", []
     return (
-        f"Blender {bpy.app.version_string}, PM VR {version or '?'}, "
+        f"Blender {bpy.app.version_string}, PM VR {version or '?'} (commit {addon_commit()}), "
         f"file {bpy.data.filepath or 'unsaved'}, Cycles {device} "
         f"({backend}: {', '.join(gpus) or 'no GPU enabled'})"
     )
+
+
+def addon_commit():
+    """Identify the actual addon checkout, including a linked Git worktree.
+
+    Installed release archives may not contain Git metadata. Logging must still
+    work there, and a missing/slow Git executable must never block a bake.
+    """
+    root = Path(__file__).resolve().parents[2]
+    if not (root / '.git').exists():
+        return 'unknown'
+    try:
+        result = subprocess.run(
+            ['git', '-C', str(root), 'rev-parse', '--short=12', 'HEAD'],
+            capture_output=True, text=True, timeout=2,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
+        value = result.stdout.strip()
+        if result.returncode == 0 and value and all(c in '0123456789abcdef' for c in value):
+            return value
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return 'unknown'
