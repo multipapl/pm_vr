@@ -4,6 +4,7 @@ Legacy fields remain authoritative for DAY/EVENING reads. Writes also update
 the new collections, allowing v2 to read a file saved by v3 without rebaking.
 """
 import re
+import os
 
 import bpy
 
@@ -215,11 +216,36 @@ def variant_signature(variant, state):
 
 
 def set_variant_result(variant, state, path, signature):
+    # Blender remaps native image paths during Save As, but not strings in
+    # addon PropertyGroups. Store these file references absolutely so a new
+    # blend location cannot make an existing variant appear unbaked.
+    path = _stable_variant_path(path)
     result = _collection_result(variant.look_results, state, True)
     result.file, result.signature = path, signature
     if state in LEGACY:
         setattr(variant, LEGACY[state] + '_file', path)
         setattr(variant, LEGACY[state] + '_signature', signature)
+
+
+def _stable_variant_path(path):
+    # A relative reference has no project root until the first save. Do not
+    # accidentally bind it to the process working directory in an unsaved file.
+    if not path or (path.startswith('//') and not bpy.data.filepath):
+        return path
+    return os.path.normpath(bpy.path.abspath(path))
+
+
+def pin_variant_paths(project):
+    """Keep existing legacy and arbitrary-look references valid across Save As."""
+    for unit in project.bake_units:
+        for variant in unit.variants:
+            for field in ('day_file', 'evening_file'):
+                path = getattr(variant, field)
+                if path:
+                    setattr(variant, field, _stable_variant_path(path))
+            for result in variant.look_results:
+                if result.file:
+                    result.file = _stable_variant_path(result.file)
 
 
 def queue_done(entry, state):

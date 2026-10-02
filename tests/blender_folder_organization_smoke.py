@@ -49,11 +49,15 @@ looks.set_result(unit, 'DAY', signature='v2:unchanged', image_name=image.name, s
 variant = unit.variants.add()
 looks.set_variant_result(variant, 'DAY', '//Beauty_Bakes/atlas.png', 'v2:unchanged')
 looks.set_variant_result(variant, 'NIGHT', '//Beauty_Bakes/atlas.png', 'v2:unchanged')
+assert looks.variant_file(variant, 'DAY') == '//Beauty_Bakes/atlas.png', 'Unsaved relative path was bound to process directory'
 other = bpy.data.scenes.new('Second scene')
 other.pm_vr_project.beauty_output_directory = '//Beauty_Bakes/'
 other.pm_vr_project.legacy_working_directory = True
 blend = root / 'Legacy.blend'
 bpy.ops.wm.save_as_mainfile(filepath=str(blend))
+looks.pin_variant_paths(project)
+assert Path(looks.variant_file(variant, 'DAY')) == root / 'Beauty_Bakes/atlas.png'
+assert Path(looks.variant_file(variant, 'NIGHT')) == root / 'Beauty_Bakes/atlas.png'
 prefs = bpy.context.preferences.filepaths.save_version
 
 # No overwrites, including a previously existing empty destination.
@@ -97,8 +101,8 @@ assert project.usdz_output_directory == '//OwnerSync/USD/'
 assert project.glb_output_directory == '//OwnerSync/GLB/'
 assert project.probe_output_directory == '//OwnerSync/probes/'
 assert other.pm_vr_project.beauty_output_directory.rstrip('/\\') == '//PMVR/Bakes'
-assert looks.variant_file(variant, 'DAY') == '//PMVR/Bakes/atlas.png'
-assert looks.variant_file(variant, 'NIGHT') == '//PMVR/Bakes/atlas.png'
+assert Path(looks.variant_file(variant, 'DAY')) == root / 'PMVR/Bakes/atlas.png'
+assert Path(looks.variant_file(variant, 'NIGHT')) == root / 'PMVR/Bakes/atlas.png'
 assert looks.result_value(unit, 'DAY', 'signature') == 'v2:unchanged'
 assert (external / 'keep.txt').read_text() == 'owner texture'
 assert bpy.context.preferences.filepaths.save_version == prefs
@@ -107,6 +111,16 @@ bpy.ops.wm.open_mainfile(filepath=str(blend))
 assert bpy.data.images['Existing atlas'].filepath.replace('\\', '/') == '//PMVR/Bakes/atlas.png'
 assert bpy.data.objects[object_name]['stable_id'] == 'unchanged-source'
 assert bpy.context.scene.pm_vr_project.bake_units[0].day_signature == 'v2:unchanged'
+alternate = root / 'Alternate' / 'Moved.blend'
+alternate.parent.mkdir()
+bpy.ops.wm.save_as_mainfile(filepath=str(alternate), relative_remap=True)
+bpy.ops.wm.open_mainfile(filepath=str(alternate))
+assert Path(bpy.path.abspath(bpy.data.images['Existing atlas'].filepath)).resolve() == root / 'PMVR/Bakes/atlas.png'
+moved = bpy.context.scene.pm_vr_project.bake_units[0].variants[0]
+assert Path(bpy.path.abspath(looks.variant_file(moved, 'DAY'))).resolve() == root / 'PMVR/Bakes/atlas.png'
+assert Path(bpy.path.abspath(looks.variant_file(moved, 'NIGHT'))).resolve() == root / 'PMVR/Bakes/atlas.png'
+assert Path(bpy.data.images['Existing atlas']['pm_lightmap_export_path']) == root / 'PMVR/Bakes/atlas.png'
+bpy.ops.wm.open_mainfile(filepath=str(blend))
 journal = Path(report['backupBlend']).parent / 'organization.json'
 assert json.loads(journal.read_text())['phase'] == 'COMPLETE'
 try:

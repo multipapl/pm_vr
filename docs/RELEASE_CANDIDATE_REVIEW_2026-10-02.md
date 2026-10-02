@@ -37,6 +37,12 @@ destination. Static checks are one part of the review, not proof of all behavior
 - Source-root, bake/output/probe configuration is disabled during operations;
   the log folder can still be opened. This prevents changing job destinations
   or project ownership while a modal queue/render is running.
+- Hidden variant file strings do not take part in Blender's Save As path
+  remapping. Existing references are pinned to their absolute files on load,
+  and new results use absolute paths once the project has a saved location.
+  Organization does the same for variant paths and legacy lightmap custom
+  metadata. Native image/output paths retain normal blend-relative behavior.
+  A first-unsaved-file reference is never resolved against the process cwd.
 
 ## Existing-project organization
 

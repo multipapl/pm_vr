@@ -98,8 +98,18 @@ def schema(rna):
 
 def properties(item, fields):
     return {key: [properties(child, nested) for child in getattr(item, key)]
-            if nested is not None else value(getattr(item, key))
+            if nested is not None else path_value(item, key)
             for key, nested in fields.items()}
+
+
+def path_value(owner, key):
+    item = getattr(owner, key)
+    prop = owner.bl_rna.properties[key]
+    if (prop.type == 'STRING' and item and
+            (prop.subtype in {'FILE_PATH', 'DIR_PATH'} or key in {'file', 'day_file', 'evening_file'})):
+        datablock = getattr(owner, 'id_data', owner)
+        return str(Path(bpy.path.abspath(item, library=getattr(datablock, 'library', None))).resolve())
+    return value(item)
 
 
 def digest(data):
@@ -141,7 +151,7 @@ def node_tree(tree):
             item = getattr(node, prop.identifier)
             if prop.type == 'POINTER' and item is not None and not isinstance(item, bpy.types.ID):
                 continue
-            fields[prop.identifier] = value(item)
+            fields[prop.identifier] = path_value(node, prop.identifier)
         nodes[node.name] = {'type': node.bl_idname, 'properties': fields,
                             'inputs': {f'{i}:{socket.identifier}': value(socket.default_value)
                                        for i, socket in enumerate(node.inputs)
@@ -248,7 +258,7 @@ for cycle in range(args.save_cycles + 1):
     print('PMVR_TRANSITION_CYCLE_OK', cycle, len(current['objects']), len(current['meshes']), flush=True)
     if cycle < args.save_cycles:
         saved_blend = output / f'UniPlace_v3_saved_{cycle + 1}.blend'
-        assert bpy.ops.wm.save_as_mainfile(filepath=str(saved_blend), relative_remap=False) == {'FINISHED'}
+        assert bpy.ops.wm.save_as_mainfile(filepath=str(saved_blend), relative_remap=True) == {'FINISHED'}
         bpy.ops.wm.open_mainfile(filepath=str(saved_blend))
 
 if args.export:

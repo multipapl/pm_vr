@@ -92,7 +92,11 @@ def _path_changes(jobs):
             if resolved.is_relative_to(source):
                 if library or not getattr(datablock, 'is_editable', True):
                     raise OrganizationError(f'A linked datablock uses {value}; localize it before organizing')
-                mapped = bpy.path.relpath(str(target / resolved.relative_to(source))).replace(os.sep, '/')
+                destination = str(target / resolved.relative_to(source))
+                # Legacy lightmap metadata is read by os.path, not bpy.path.
+                # Custom ID strings do not participate in Blender Save As
+                # remapping and must retain a real absolute file path.
+                mapped = destination if custom or key in {'file', 'day_file', 'evening_file'} else bpy.path.relpath(destination).replace(os.sep, '/')
                 changes.append((owner, key, custom, value, mapped))
                 break
 

@@ -669,3 +669,15 @@ to the CURRENT shared guide (backup its bytes outside Sync first), record final
 acceptance/production hashes, commit/push review docs. Do not redo snapshot or
 rerun full fixture suite without new changes/failures. Original production main
 is clean7e890086; bake_scene.py/constants.py still match v2.0.0. Heartbeat PAUSED.
+
+Follow-up during final review: real Save As to an After/ subfolder exposed
+a test harness error (relative_remap=False) and hidden variant file strings
+which Blender never remaps. The helper now uses normal relative_remap=True;
+load/new results pin variant files absolutely without changing signatures or
+legacy fields, and organization pins custom lightmap metadata absolutely.
+Unsaved relative references stay relative until a saved root exists. Native
+image paths still follow Blender remapping. Folder smoke includes actual
+Save As/reopen/rollback. Seven background +three GUI targeted cases PASS.
+Final After cycles0/1 both PASS (1952 audited paths). Before/After fingerprints
+match exactly with only 502 verified folder-path remaps and path format1->2.
+Actual full export/comparison and shared-guide append remain pending.
