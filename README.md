@@ -259,7 +259,9 @@ and `gui-only` runs those cases alone. Detailed logs are kept under
 `%TEMP%/pmvr_test_logs`. Use a private Blender configuration and temp directory
 for verification.
 
-**Object tools** shows platform properties for the selected object's semantic
+Setup groups **Viewport**, **Runtime** and **Object Properties** into separate
+boxes. Runtime creation/naming/checks and property editing appear only in Setup.
+**Object Properties** shows platform properties for the selected object's semantic
 layer or Runtime role. Selecting a generated mesh edits its named original.
 **Set** adds an optional override without replacing existing values; **X**
 restores inheritance. With multiple objects selected, the copy arrow explicitly
@@ -276,7 +278,7 @@ stay outside lighting collections. **Check Runtime** reports naming, type,
 required helper, paired anchor, property and local resource issues; clicking
 an object name selects it. AM remains the final export/placement validator.
 
-Viewport **Sources / Generated / Both** is available in Setup, Bake and Export.
+Viewport **Sources / Generated / Both** is available in Setup and Bake.
 Sources and Generated are exclusive; Both is a deliberate comparison mode.
 After a queue, Generated + **Last queue only** shows successfully committed
 units; a single-look rebake shows that look. Failed, skipped or interrupted
@@ -284,6 +286,11 @@ old results are excluded. Disable the filter to see all generated results;
 clicking a different unit also releases the filter to select its result.
 The filter changes viewport visibility only, never export membership.
 Click a unit to select its visible members, or use the magnifier to frame it.
+Glass, Emissive, Runtime and legacy unbaked members use a clickable, scrollable
+object list with alphabetical names and search. Clicking a row shows Sources
+and selects that original; viewport selection highlights its row. Renaming or
+deleting an object cannot make its row target a different object. Excluded
+collections remain excluded.
 Generated materials select their **PMVR Baked Beauty** node automatically,
 including after loading older saved bakes. None of these tools changes bake
 compatibility signatures or requires an existing-scene rebake.

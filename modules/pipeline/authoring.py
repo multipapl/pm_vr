@@ -583,27 +583,33 @@ def draw_property(layout, context, obj, key):
         op.key, op.action = key, 'ADD'
 
 
-def draw(layout, context):
-    project = context.scene.pm_vr_project
-    if not project.initialized:
-        return
-    obj = source_object(context.object)
-    fields = fields_for(project, obj)
+def draw_runtime(layout, context, project, obj):
     box = layout.box()
     box.enabled = not project.operation_running
     header = box.row(align=True)
-    header.label(text='Object tools', icon='OBJECT_DATA')
-    header.operator('pmvr.runtime_role', text='Create Runtime', icon='ADD').create = True
-    header.operator('pmvr.check_runtime', text='', icon='CHECKMARK')
-    if context.scene.pm_vr_ui_state.stage != 'BAKE':
-        box.prop(project, 'preview_mode', expand=True)
-        if project.show_generated and (project.preview_results or project.preview_last_queue):
-            box.prop(project, 'preview_last_queue', text='Last queue only')
+    header.label(text='Runtime', icon='EMPTY_AXIS')
+    header.operator('pmvr.check_runtime', text='Check', icon='CHECKMARK')
+    box.operator('pmvr.runtime_role', text='Create Runtime', icon='ADD').create = True
+    if obj and not obj.pm_vr_pipeline.bake_unit_id:
+        box.operator('pmvr.runtime_role', text='Set Runtime role / name', icon='SORTALPHA')
+    layer = find_layer(project, obj.pm_vr_pipeline.render_layer_id) if obj else None
+    if layer and layer.layer_type == 'RUNTIME':
+        for hint in media_hints(obj.name):
+            box.label(text=hint, icon='FILE')
+
+
+def draw_properties(layout, context, project, obj):
+    box = layout.box()
+    box.enabled = not project.operation_running
+    box.label(text='Object Properties', icon='PROPERTIES')
     if context.object and context.object.get(TAG_GENERATED) and obj is None:
         box.label(text='Cannot find a unique original source', icon='ERROR')
+    elif obj is None:
+        box.label(text='Select a source or generated object', icon='INFO')
     if obj:
-        if context.object != obj:
-            box.label(text='Original: ' + obj.name, icon='LINKED')
+        box.label(text=('Original: ' if context.object != obj else '') + obj.name,
+                  icon='LINKED' if context.object != obj else 'OBJECT_DATA')
+        fields = fields_for(project, obj)
         if fields:
             body = box.column(align=True)
             body.enabled = editable(obj)
@@ -611,14 +617,19 @@ def draw(layout, context):
                 draw_property(body, context, obj, key)
             if len(context.selected_objects) > 1:
                 body.label(text='Copy arrow applies this value to compatible selected sources', icon='INFO')
-        if not obj.pm_vr_pipeline.bake_unit_id:
-            box.operator('pmvr.runtime_role', text='Set Runtime role / name', icon='SORTALPHA')
-        layer = find_layer(project, obj.pm_vr_pipeline.render_layer_id)
-        if layer and layer.layer_type == 'RUNTIME':
-            for hint in media_hints(obj.name):
-                box.label(text=hint, icon='FILE')
-        elif not fields:
+        else:
             box.label(text='No platform properties for this layer')
+
+
+def draw(layout, context):
+    project = context.scene.pm_vr_project
+    if not project.initialized:
+        return
+    from . import preview
+    preview.draw(layout, project)
+    obj = source_object(context.object)
+    draw_runtime(layout, context, project, obj)
+    draw_properties(layout, context, project, obj)
 
 
 CLASSES = (PMVR_OT_PlatformProperty, PMVR_OT_RuntimeRole, PMVR_OT_SelectRuntimeIssue, PMVR_OT_CheckRuntime)

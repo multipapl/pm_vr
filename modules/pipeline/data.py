@@ -61,6 +61,24 @@ def _queue_selected(project, context):
     list_selected(project, context, True)
 
 
+def _original_index(project):
+    from .selection_sync import original_list_member, original_object
+    obj = original_object(project)
+    return bpy.data.objects.find(obj.name) if obj and original_list_member(project, obj) else -1
+
+
+def _set_original_index(project, value):
+    from .selection_sync import original_list_member, set_original_object
+    objects = bpy.data.objects
+    obj = objects[value] if 0 <= value < len(objects) else None
+    set_original_object(project, obj if obj and original_list_member(project, obj) else None)
+
+
+def _original_selected(project, context):
+    from .selection_sync import original_selected
+    original_selected(project, context)
+
+
 def _bake_mode_changed(project, context):
     from .setup_ops import preview_generated, preview_state
 
@@ -651,6 +669,12 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
 
     render_layers: bpy.props.CollectionProperty(type=PMVR_RenderLayer)
     active_render_layer_index: bpy.props.IntProperty(default=0, min=0, update=_active_layer_changed)
+    # UI navigation only, keyed by an in-memory object session identity. An ID
+    # pointer would add a datablock user and could keep a deleted source alive.
+    active_original_object_index: bpy.props.IntProperty(
+        default=-1, min=-1, get=_original_index, set=_set_original_index,
+        update=_original_selected, options={'HIDDEN', 'SKIP_SAVE'},
+    )
     bake_units: bpy.props.CollectionProperty(type=PMVR_BakeUnit)
     active_bake_unit_index: bpy.props.IntProperty(default=0, min=0, update=_unit_selected)
     bake_queue: bpy.props.CollectionProperty(type=PMVR_BakeQueueEntry)

@@ -514,3 +514,50 @@ hashes. All own Blender inputs were private copies/fixtures; original paths
 were read/hashed only. Production main remains clean7e890086. Heartbeat stays
 PAUSED. Owner activates code by restarting the isolated Blender_v3.bat;
 ordinary Blender remains production v2.0.1.
+
+## 2026-10-02 — Original-object lists and Setup organization
+
+Owner reported that Glass/Runtime object lists could not select or scroll and
+requested separate Setup blocks, with property/Runtime authoring in Setup only.
+This follow-up supersedes the earlier single Object Tools box in all stages.
+
+- Setup original objects now use PMVR_UL_OriginalObjects, a native clickable,
+  scrollable alphabetical list with a compact search field. All Glass,
+  Emissive, Runtime and legacy unbaked members remain accessible; the previous
+  eight-label truncation is removed. No export membership code changed.
+- The selected row tracks an object session identity in memory and resolves its
+  CURRENT native collection index. Rename/delete/reorder/layer switches cannot silently
+  target a different object. Clicking shows Sources and selects that original;
+  reverse viewport sync highlights it without replacing manual multi-selection.
+  Navigation/bake/Edit Mode guards remain. Excluded collections stay excluded;
+  render flags, source IDs, layer ownership and bake IDs stay unchanged.
+  No saved object pointer or extra datablock user: deleting a focused original
+  really removes it, and a new object with the same name cannot steal its row.
+- Setup has separate Viewport, Runtime and Object Properties boxes. Contextual
+  source properties, Create/Set Runtime and Check are absent from Bake/Export.
+  Bake retains its existing preview controls for reviewing committed results.
+  Exact platform property keys and inheritance/bulk-copy behavior unchanged.
+- Real-window verification of a brand-new project exposed probe initialization
+  deferred until read-only Bake drawing. Initialize Project now finishes the
+  existing probe migration before drawing. Probe behavior/formats unchanged.
+
+Verification for this UI follow-up: seven targeted background cases and four
+real-window cases pass (not a claim of rerunning the whole previous suite).
+Background: original-list navigation, UI wiring, semantic schema, Setup,
+export visibility, artist tools with real small CPU PBR/Alpha bakes and USDZ,
+and probes with real CPU renders. Real windows: 30 Glass/45 Runtime rows clicked
+and wheel-scrolled through their last entries, search, Setup/Runtime/settings
+dialogs with Bake/Export authoring absent, existing unit operations and
+selection sync before/after File Open. Save/reopen, rename/delete, no wrong-layer
+highlight, running-operation guard, excluded collection and stable membership
+checks pass. No GPU bake or new full-UniPlace export needed for this UI change.
+
+Evidence: D:/Blender_Python_v3/_environment/original_list_* logs;
+original_list_acceptance_summary.json records the final commit and push.
+Screenshots are private generated fixtures under _temp/pmvr_original_gui_* and
+_temp/pmvr_setup_ui_*. run_tests.bat includes the new original-list GUI case;
+the new background smoke is discovered automatically. Entire bake_scene.py
+and constants.py still match v2.0.0; no signature/schema/legacy-field edits.
+All edits remain in v3 only; production main is clean7e890086. No owner scene,
+Sync/bake folders, normal preferences or running Blender were modified by us.
+Heartbeat remains PAUSED. Restart the isolated Blender_v3.bat to load changes.

@@ -2,7 +2,9 @@
 
 ## v3 development
 
-- Contextual Object Tools edit exact platform properties on originals, including when a generated mesh is selected; inherited values stay optional and multi-selection copying is explicit.
+- Original-export layers use a native clickable/scrollable object list with search and stable object targets; viewport selection highlights the matching row.
+- Setup separates Viewport, Runtime and Object Properties. Runtime authoring and contextual properties no longer clutter Bake or Export.
+- Contextual Object Properties edit exact platform properties on originals, including when a generated mesh is selected; inherited values stay optional and multi-selection copying is explicit.
 - One Runtime dialog creates markers, zone boxes and probe cameras or names existing meshes; exact role/zone/look names, object types, conflicts and linked media are checked. Sky look names and collection membership agree.
 - Sources/Generated are exclusive by default; Both is explicit. Finished queues show only committed results in an appropriate look, with a removable Last Queue filter that never limits export.
 - Clicking a Setup or Bake queue unit selects its visible members; reverse selection stays narrow and running bake receiver selection is protected. Find in Viewport frames a unit.

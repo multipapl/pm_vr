@@ -4,7 +4,7 @@ import bpy
 from contextlib import contextmanager
 from bpy.app.handlers import persistent
 
-from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_SOURCE_ID, TAG_UNIT_ID
+from .constants import BAKE_LAYER_TYPES, TAG_GENERATED, TAG_LAYER_ID, TAG_SOURCE_ID, TAG_UNIT_ID
 from .identity import sources_by_id
 
 
@@ -12,6 +12,7 @@ _MSGBUS_OWNER = object()
 _timer_pending = False
 _applying = False
 _navigation_depth = 0
+_original_targets = {}
 
 
 @contextmanager
@@ -27,6 +28,65 @@ def navigation_guard():
 def set_index(project, key, value):
     with navigation_guard():
         setattr(project, key, value)
+
+
+def original_list_member(project, obj):
+    """Same source membership as Setup, without an extra persistent cache."""
+    index = project.active_render_layer_index
+    if not 0 <= index < len(project.render_layers) or obj.get(TAG_GENERATED):
+        return False
+    layer = project.render_layers[index]
+    metadata = obj.pm_vr_pipeline
+    return (metadata.is_registered_source and metadata.render_layer_id == layer.layer_id
+            and (layer.layer_type not in BAKE_LAYER_TYPES or metadata.processing_role == 'EXPORT_ORIGINAL'))
+
+
+def set_original_object(project, obj):
+    key = project.id_data.session_uid
+    if obj is None:
+        _original_targets.pop(key, None)
+    else:
+        _original_targets[key] = (obj.session_uid, obj.name)
+
+
+def original_object(project):
+    """UI focus without an ID user, a saved reference or stale RNA pointers."""
+    key = project.id_data.session_uid
+    target = _original_targets.get(key)
+    if target is None:
+        return None
+    uid, name = target
+    obj = bpy.data.objects.get(name)
+    if obj is None or obj.session_uid != uid:
+        # Rename/undo can change the collection index and label; the session
+        # identity is unchanged. A replacement with the same name is different.
+        obj = next((item for item in bpy.data.objects if item.session_uid == uid), None)
+        set_original_object(project, obj)
+    return obj
+
+
+def original_selected(project, context):
+    if _applying or _navigation_depth or project.operation_running:
+        return
+    if not context.view_layer or not context.scene or context.scene.pm_vr_project != project:
+        return
+    if context.object and context.object.mode != 'OBJECT':
+        return
+    obj = original_object(project)
+    if not obj or not original_list_member(project, obj) or obj.name not in context.view_layer.objects:
+        return
+    # An original must be visible even if the previous view showed only bakes.
+    # This is viewport navigation, never render flags or collection exclusions.
+    project.preview_mode = 'SOURCES'
+    obj.hide_set(False)
+    if not obj.visible_get(view_layer=context.view_layer):
+        return
+    with navigation_guard():
+        for selected in context.selected_objects:
+            selected.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+    _redraw_viewports()
 
 
 def list_selected(project, context, queue=False):
@@ -142,6 +202,11 @@ def _sync(scene, view_layer):
         # Export Original and other non-bake sources navigate the layer list
         # only. Undo the layer-index callback's convenience unit selection.
         project.active_bake_unit_index = previous_unit_index
+    if original_list_member(project, obj) and original_object(project) != obj:
+        # _sync is guarded: reverse navigation highlights the row without
+        # showing sources or replacing a user's existing multi-selection.
+        set_original_object(project, obj)
+        changed = True
     return changed
 
 
@@ -224,6 +289,8 @@ def _subscribe():
 def _load_post(_filepath):
     # Blender drops every message-bus subscription when a file is loaded.
     _subscribe()
+    _original_targets.clear()
+    request_sync()
 
 
 def register():
@@ -240,3 +307,4 @@ def unregister():
     if bpy.app.timers.is_registered(_flush):
         bpy.app.timers.unregister(_flush)
     _timer_pending = False
+    _original_targets.clear()

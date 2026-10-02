@@ -320,6 +320,10 @@ class PMVR_OT_InitializeProject(bpy.types.Operator):
         working_directory.initialize(project)
         ensure_project_id(project)
         looks.ensure(project)
+        # Finish probe setup in this editable operator, before Bake's panel
+        # queries cameras in Blender's read-only drawing context.
+        from . import probes
+        probes.migrate(project)
         project.schema_version = SCHEMA_VERSION
         working_directory.ensure_new_folders(project)
         if not project.render_layers:

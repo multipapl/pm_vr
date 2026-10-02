@@ -109,6 +109,31 @@ class PMVR_UL_BakeUnits(bpy.types.UIList):
         row.prop(item, "resolution", text="")
 
 
+class PMVR_UL_OriginalObjects(bpy.types.UIList):
+    def draw_filter(self, _context, layout):
+        # Keep names alphabetical and expose only the useful search control.
+        layout.prop(self, 'filter_name', text='', icon='VIEWZOOM')
+
+    def filter_items(self, context, data, propname):
+        from .selection_sync import original_list_member
+        objects = getattr(data, propname)
+        helpers = bpy.types.UI_UL_list
+        flags = helpers.filter_items_by_name(self.filter_name, self.bitflag_filter_item, objects, 'name')
+        if not flags:
+            flags = [self.bitflag_filter_item] * len(objects)
+        project = context.scene.pm_vr_project
+        for index, obj in enumerate(objects):
+            if not original_list_member(project, obj):
+                flags[index] = 0
+        return flags, helpers.sort_items_by_name(objects, 'name')
+
+    def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index):
+        # A label lets the full row select the object rather than edit its name.
+        layout.label(text=item.name, icon_value=_icon)
+        if item.name not in context.view_layer.objects:
+            layout.label(text='', icon='HIDE_ON')
+
+
 class PMVR_UL_BakeQueue(bpy.types.UIList):
     def draw_item(self, context, layout, _data, item, _icon, _active_data, _active_propname, _index):
         unit = find_unit(context.scene.pm_vr_project, item.unit_id)
@@ -217,7 +242,7 @@ def draw_setup(layout, context):
             nav.operator("pmvr.queue_layer_units", text=f"Queue {units} Units", icon='RENDER_STILL')
 
     if layer and layer.layer_type not in BAKE_LAYER_TYPES:
-        draw_original_objects(layout, layer, layer_members(layer.layer_id))
+        draw_original_objects(layout, project, layer_members(layer.layer_id))
     else:
         draw_bake_units(layout, project)
         # Unbaked objects in a baked layer are no longer added from Setup;
@@ -227,23 +252,19 @@ def draw_setup(layout, context):
             if obj.pm_vr_pipeline.processing_role == 'EXPORT_ORIGINAL'
         ]
         if originals:
-            draw_original_objects(layout, layer, originals, can_add=False)
+            draw_original_objects(layout, project, originals, can_add=False)
 
 
-def draw_original_objects(layout, layer, objects, can_add=True):
+def draw_original_objects(layout, project, objects, can_add=True):
     """Glass, Emissive and Runtime are not baked and have no units: the same
     place lists the layer's objects; + adds the selection, - takes it out."""
     box = layout.box()
-    box.label(text="Objects" if can_add else "Unbaked Objects", icon='OBJECT_DATA')
-    members = sorted(objects, key=lambda obj: obj.name.casefold())
+    box.label(text=("Objects" if can_add else "Unbaked Objects") + f" ({len(objects)})", icon='OBJECT_DATA')
     row = box.row()
-    names = row.box().column(align=True)
-    for obj in members[:8]:
-        names.label(text=obj.name, icon='OBJECT_DATA')
-    if len(members) > 8:
-        names.label(text=f"and {len(members) - 8} more")
-    if not members:
-        names.label(text="No objects yet")
+    row.template_list("PMVR_UL_OriginalObjects", "", bpy.data, "objects", project,
+                      "active_original_object_index", rows=6)
+    if not objects:
+        box.label(text="No objects yet")
     controls = row.column(align=True)
     if can_add:
         op = controls.operator("pmvr.assign_selected_to_layer", text="", icon='ADD')
@@ -672,6 +693,7 @@ class PMVR_OT_ShowHelp(bpy.types.Operator):
 CLASSES = (
     PMVR_UL_RenderLayers,
     PMVR_UL_BakeUnits,
+    PMVR_UL_OriginalObjects,
     PMVR_UL_BakeQueue,
     PMVR_UL_BakeScenarios,
     PMVR_UL_ScenarioCollections,

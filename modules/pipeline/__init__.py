@@ -165,11 +165,11 @@ def unregister():
 def draw_stage(layout, context, stage):
     if stage == 'SETUP':
         ui.draw_setup(layout, context)
+        authoring.draw(layout, context)
     elif stage == 'BAKE':
         ui.draw_bake(layout, context)
     elif stage == 'EXPORT':
         ui.draw_export(layout, context)
-    authoring.draw(layout, context)
 
 
 def draw_scene_debug(layout, context):
