@@ -1,6 +1,6 @@
 # Changelog
 
-## v3 development
+## 3.0.0-rc.1 — 2026-10-02
 
 - Explicit Organize Local Files consolidates verified legacy working data into PMVR with live path remapping, save-before-archive, complete backups and rollback. New Lightmaps/externalized textures also live inside PMVR; old implicit paths remain pinned on load.
 - Partial export after a default-look rename preserves other committed layers; removed-look descriptions are retired. Variant manifests include only ready current bakes and publish atomically. Final metadata errors reach the export summary.

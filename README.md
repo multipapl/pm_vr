@@ -3,7 +3,7 @@
 A production pipeline addon for preparing, baking, previewing, and exporting
 Apple Vision Pro scenes from Blender 5.2.
 
-The isolated v3 branch writes `PMVR_Export_<Look>.json` beside USDZ packages.
+Version 3.0.0 RC1 writes `PMVR_Export_<Look>.json` beside USDZ packages.
 The description lists the current exported layers and variants, including files
 retained from earlier partial exports. Deleted or renamed layers disappear from
 the list. Asset Manager reads this list and ignores unlisted old packages.
