@@ -753,3 +753,32 @@ Owner can launch normal Blender and open his usual UniPlace path now. Content
 preparation/PBR Diffuse Only/Runtime and AM/Vision Pro acceptance remain separate;
 production Sync still contains its previous packages because no export occurred.
 No online publishing. No further requested deployment work remains.
+
+## 2026-10-02 — Post-RC1 authoring clarifications in shared guide
+
+Owner's latest questions are recorded as section21 in the production Sync
+PMVR_правила_платформи.md and mirrored in docs/MAC_HANDOFF_2026-10-02.md.
+This adds Bedroom Hotspot/Zone/SkyPoint and per-zone panoramas, overlap versus
+unsupported fully nested zones, numeric Music/SFX/Video instances, image
+sequence versus external Fire.mov, and the correct Sphere Size1m/100cm for
+UniPlace's Metric scale1/Centimeters display. Clarifies VariantMarker belongs
+in the Unlit unit's Marker pointer rather than needing Runtime membership;
+the Runtime checker code itself has not been changed.
+
+Also records non-Runtime mesh property starting values, scene Reflections UI,
+and the old0.15 multiplier specifically on LampEvening_PBR (not every Emissive
+or PBR object; no implicit compensation added to code). A shared black
+ShadowBox_Emissive layer exports one original in both looks outside Day/Evening
+lighting collections. Material must use Principled BSDF, black Base/Emission,
+strength1, opacity1, specular0. A separate real factory-startup USDZ confirmed
+black diffuse/emissive, opacity1, zero image textures; temporary fixture files
+were removed. No rendering/baking and no production-scene writes used.
+
+Shared guide and local mirror appended with exclusive writer access and
+byte/hash verification preserving every prior byte. Private backups and
+receipt: _environment/authoring_shared_section_21_receipt.json; exact appended
+text: _environment/shared_section_21_2026-10-02.md. Documentation-only commit
+and push stay on v3; do not merge or reload the owner's production Blender.
+Actual new content/bedroom/audio/panoramas/marker/shadowbox still requires the
+owner's fresh export and local AM/Vision Pro acceptance; these notes are not
+a completed production-content audit. Heartbeat remains PAUSED.
