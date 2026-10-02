@@ -700,3 +700,56 @@ Then PC performs the verified migration itself; owner need not sort files.
 Runtime/content/PBR preparation and VisionPro acceptance remain separate as
 section19 states. Automatic continuation remains PAUSED; no requested work
 remains for this pre-release review.
+
+## 2026-10-02 — Owner-authorized production 3.0.0 RC1 (complete)
+
+Owner accepted the preceding checks and explicitly authorized production
+promotion. This supersedes the earlier main/original/production-folder write
+restrictions for this deployment and organization only. Normal preferences,
+production exports/probes and unrelated source/media files stay unchanged.
+No subagents, owner process interruption, bake, export or GPU render used.
+
+Release metadata commit 8b8de78: bl_info (3, 0, 0), description RC1, changelog/README.
+Three existing background environment/UI/folder-organization cases PASS.
+Production main was fast-forwarded from v2.0.1/7e890086 to verified v3. Final
+documentation commit and annotated tag v3.0.0-rc.1 are pushed with both branches;
+their exact hashes are in production_promotion_summary.json below. All new
+development stays in the isolated v3 worktree. Ordinary Blender now loads RC1
+from D:/Blender_Python/addons/PM_VR with its existing Script Directory/settings.
+
+Before starting: no Blender process, latest production queue finished cleanly,
+nvidia-smi 0% GPU, enough free F:/C:. Fresh exact byte copy of original saved blend
+in C:/Users/papl/Desktop/PMVR_v3_test/ProductionPromotion_2026-10-02/
+Uniplace_original_v2.blend; SHA CEB8F6175A20CDF5AF31D72A3C022EDF91197388554C52B08EEAFE5E40102EF1.
+Source matched the reviewed fresh original, so no full re-export was needed.
+
+Actual production migration imported ONLY production main; logging muted
+during load/verification to keep old log inventory exact. F:/.../UniPlace/
+Uniplace.blend saved in place and reopened. Journal COMPLETE, repeat no-op;
+1069 files/14217036647 bytes SHA verified. Compared with reviewed private 1070,
+only the extra private test log differs; no actual bake/flattened file loss.
+1314 objects/893 meshes full fingerprints and Day/Evening layer bindings match
+before/after with only verified moved-file path remaps. Stored signatures,
+status/resolution, IDs, UV, geometry, materials/graphs and hierarchy unchanged.
+Variant files exist; no reference into old folders; export/probe settings and
+56 Sync USD/probe file size/mtime inventories unchanged. Normal userpref SHA unchanged.
+
+Production backups: F:/.../UniPlace/PMVR/Backups/BeforeOrganization_*/ contains
+live pre-organization blend, archive of old Beauty_Bakes/PMVR_Flattened/PMVR_Logs,
+organization.json with inventories/SHA and Uniplace_original_v2.blend (exact
+original bytes). Restore folders/closed blend to ORIGINAL location; do not open
+archive blend directly in its subfolder. Newer organized blend/files preserved
+by rollback. .old/SimpleBake_Bakes/renders/splatgen/textures/assets/Sync remain.
+
+Private production evidence: ProductionPromotion_2026-10-02/promotion_guard.json,
+production_organization.json, before_fingerprint.json, after_fingerprint.json,
+production_promotion_summary.json and shared_guide_receipt.json. Execution log:
+D:/Blender_Python_v3/_environment/production_organization.log. Shared Sync guide
+has appended section20 and its earlier bytes privately backed up; local
+docs/MAC_HANDOFF_2026-10-02.md mirrors it. bake_scene.py/constants.py still
+equal v2.0.0; signature/schema/legacy fields preserved. Heartbeat PAUSED.
+
+Owner can launch normal Blender and open his usual UniPlace path now. Content
+preparation/PBR Diffuse Only/Runtime and AM/Vision Pro acceptance remain separate;
+production Sync still contains its previous packages because no export occurred.
+No online publishing. No further requested deployment work remains.

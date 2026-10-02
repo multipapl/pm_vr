@@ -1,6 +1,10 @@
 # PM VR v3 — review before production promotion
 
-Status: isolated v3 only. Owner requested folder organization, a fresh whole-addon
+Historical pre-promotion review. Owner subsequently authorized production RC1;
+the completed deployment is recorded in shared-guide section20 and
+docs/NEXT_SESSION.md. Findings and isolated evidence below remain unchanged.
+
+Status during this review: isolated v3 only. Owner requested folder organization, a fresh whole-addon
 review and an updated shared Mac/history document. Production promotion and a
 release tag are not authorized yet. Original UniPlace and production settings
 remain untouched; the shared guide is the sole explicitly authorized Sync write.
