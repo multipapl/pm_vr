@@ -1,7 +1,8 @@
 # Next session
 
 **Current v3 status (2026-10-02): all authorized implementation stages0–7
-complete and verified. Owner's new-project/VisionPro acceptance remains pending;
+complete and verified. Real UniPlace v3 save/reopen and v2 rollback are now
+verified too (2026-10-02 03:21). Owner's VisionPro acceptance remains pending;
 no v3 release tag or main merge. Latest final evidence is at the end.
 Production main stays v2.0.1. Use ONLY isolated v3 worktree and test copies.**
 
@@ -422,3 +423,35 @@ Full31/31 background tests PASS, exit0 (stage6_background_suite.log). Real Fauce
 - Evidence summary: final_reference_comparison.json, Sync_v3_final_export.json, Sync_v3_final/probe_review.json, Probe_v3_review/probe_review.json with actual EXR/JPEG, PBR_v3_review/pbr_review.json and FaucetMetal_comparison.png. Detailed logs D:/Blender_Python_v3/_environment/ and individual tests _temp/pmvr_test_logs/.
 - Owner launcher D:/Blender_Python_v3/Blender_v3.bat uses separate config and42copied addon preferences/OptiX. PBR Diffuse Only defaultsOFF; Mac ready, owner may enable in test Blender and intentionally rebake only desiredPBRunits/alllooks. Ordinary original Blender stays productionv2. No automatic UniPlace rebakes or Runtime scene authoring.
 - No remaining authorized code stages. Commit/push stage7 and leave heartbeatpm-vr-v3 PAUSED. Future work only after owner feedback: file-backup of artist's new project BEFORE first v3 opening (artist file not ready), actual new-project acceptance, VisionPro visual/end-to-end acceptance, then explicitly authorized release/main merge. Do not turn automatic continuation back on merely because those human acceptance steps remain.
+
+## Actual UniPlace transition review — 2026-10-02 03:21 +03
+
+Owner asked whether existing UniPlace can move to v3 without needless scene/UV
+work. Completed real-file verification; a separate new artist project is NOT a
+prerequisite for testing this transition. Production isolation remains in force;
+this review does not authorize a main merge or edits to original UniPlace.
+
+- Original saved file still SHA256 E0044DA7E477F679E55572E535DF36B2BCDDE40E0DFBFF7BFB16877B3381A97B, identical to captured reference. Every one of1064 copied Beauty_Bakes/PMVR_Flattened files matches original size/mtime. Full SHA256 comparison before/after tests proves all14215891655 bytes unchanged. Existing snapshot already covers this exact saved project AND its external bakes; a .blend-only backup would not roll back later overwritten atlases.
+- New tests/blender_real_transition_review.py opens ONLY audited copies under test-root, audits external/output paths (including shader IES and variants), fingerprints original v2 RNA fields recursively and actual mesh topology/UV/material indices, source/generated identities/parent transforms/bindings, material/world/light/node-group graphs and image references. No unit rebake. Optional USD export may produce tiny temporary CPU colour maps through the existing exporter, never overwrite unit atlases.
+- Fresh baseline made with actual production v2.0.1 code in isolated hotfix checkout.1314 objects,893 mesh datablocks,760 materials,964 image datablocks,250 units,16 layers,1 material variant.249Ready per look; the two remaining look-specific blank records are expected: LampDaylight_PBR has no Evening bake, LampEvening_PBR no Day bake. Both sets remain valid for their respective exports.
+- Real v3 migration plus TWO saves/reopens: all three checkpoints have ZERO fingerprint differences. Every configured layer resolves its Day/Evening objects with strict generated material binding, no missing/incompatible bake, no missing generated mesh. Full post-roundtrip export:14successful+2expected skipped layers each look,30USDZ plus variant JSON and2 descriptors. Fingerprint remains EXACT after export too.
+- ALL30 roundtrip v3 packages compare exact to accepted Sync_v3_final/USD: every authored USD field/UV/shader/property, all packaged media SHA256, variant manifest. Earlier accepted v3-v2 difference remains intentional probe representation only; this new roundtrip comparison has NO allowed differences, including Runtime.
+- Saved v3 file reopened with actual v2.0.0 AND current v2.0.1: ZERO legacy/geometry/material fingerprint differences, full Day/Evening binding resolution passes. v2.0.1 full rollback export ALL30 packages compares exact to original tag-v2.0.0 Sync_v2/USD, including Runtime, embedded media and variants. v2.0.0 reopening/bindings checked; its full export was not repeated in this review.
+- Actual GUI process with isolated owner-style preferences/42 enabled addons (no factory-startup): loaded v3 file, exact fingerprint and both-look resolution PASS. No PM VR errors. Existing third-party Sweep Modifier unregister NameError and BlenderKit unsubscribe timeout on shutdown are also in preparation-era startup_verification.log; unrelated to v3 file migration. Production preferences unchangedSHA B9D4E1F7F6F4F975589CFE6DA0F8A4A931371D927F764D8E686AF9AF0ED1D49F. All owned Blender jobs exited.
+- Protected entire bake_scene.py/constants.py STILL identical to v2.0.0; no schema/signature code changed. Production main remains clean7e890086. This work adds verification/documentation only, no addon behavior change. Heartbeat remainsPAUSED.
+
+Evidence root: C:/Users/papl/Desktop/PMVR_v3_test/Transition_UniPlace_2026-10-02.
+Baseline/transition_review.json; V3/transition_review.json and
+V3/UniPlace_v3_saved_2.blend; GUI/transition_review.json;
+Rollback_v2_0_0/transition_review.json; Rollback_v2_0_1/transition_review.json;
+v3_roundtrip_usd_comparison.json; v2_rollback_usd_comparison.json;
+assets_before.json/assets_after.json; source_asset_inventory.json;
+V3_inventory/transition_review.json; new_mac_contract_inventory.json.
+Detailed logs: D:/Blender_Python_v3/_environment/transition_*.log/.err.
+
+### Concrete remaining work is the NEW MAC data contract, not file migration
+
+- PBR Diffuse Only remainsOFF. Installing/opening v3 does NOT invalidate bakes and requires no UV rework/full-scene rebake. EnablingON does NOT convert existing atlases automatically; for the new Mac shader intentionally rebake only16 PBR units for their applicable Day/Evening looks (30 results). Existing non-PBR bakes stay usable. Keep old external atlases in the snapshot for rollback.
+- This scene has LO_StartPosition/TR_StartPosition but no exact StartPosition; SkyboxDaylight/SkyboxNight and8 legacy Runtime names do not meet the new role dictionary. V3 deliberately preserves them. Known mappings/properties from the authoritative guide can be prepared on a copy; do not guess/remove unknown objects or claim the unmodified scene is already new-AM-ready.
+- Current Glass USD opacity is0 with NO object opacity override. New Mac no longer inserts the old0.18, so simply feeding unchanged data to the new Mac can make glass invisible. Current Translucent has NO opacity/brightness overrides; set the guide's authored values for the desired appearance. These properties reach generated export objects without rebaking.
+- Old probe renderer already used world-aligned +90X panoramas, as new renderer does. Do not invent a mandatory full probe rebake merely because exported probe cameras now become position-only points; original22EXR files exist. Actual headset appearance/new Mac assembly still need validation with a prepared new-contract export. Source-original, its Sync and bake folders remain read-only.
