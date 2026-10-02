@@ -34,6 +34,9 @@ class _LayoutRecorder:
     def box(self):
         return self
 
+    def panel(self, _identifier, **_kwargs):
+        return self, self
+
     def row(self, **_kwargs):
         return self
 

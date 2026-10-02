@@ -4,6 +4,7 @@ import bpy
 
 from . import looks
 from .constants import TAG_GENERATED, TAG_MODE, TAG_SOURCE_ID, TAG_UNIT_ID
+from .ui_sections import section
 
 _changing = False
 
@@ -118,10 +119,12 @@ def finish(context, results, preferred_state):
 
 
 def draw(layout, project):
-    box = layout.box()
+    stage = project.id_data.pm_vr_ui_state.stage.lower()
+    box = section(layout, 'pmvr_' + stage + '_viewport', 'Viewport', 'HIDE_OFF')
+    if box is None:
+        return
     box.enabled = not project.operation_running
-    box.label(text='Viewport', icon='HIDE_OFF')
-    box.prop(project, 'preview_mode', expand=True)
+    box.row(align=True).prop(project, 'preview_mode', expand=True)
     if project.show_generated and (project.preview_results or project.preview_last_queue):
         box.prop(project, 'preview_last_queue', text='Last queue only')
         if project.preview_last_queue:

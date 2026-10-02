@@ -7,6 +7,7 @@ import bpy
 from . import looks, platform
 from .constants import TAG_GENERATED, TAG_SOURCE_ID
 from .identity import ensure_source_id, find_layer, layer_members
+from .ui_sections import section
 
 # These are UI labels only; the keys are the existing export contract.
 FIELDS = {
@@ -124,13 +125,17 @@ def write_value(obj, key, value):
 
 class PMVR_OT_PlatformProperty(bpy.types.Operator):
     bl_idname = 'pmvr.platform_property'
-    bl_label = 'Platform Property'
+    bl_label = 'Add Property'
     bl_description = 'Edit the exact export property on the original source; keep other existing values'
-    bl_options = {'REGISTER', 'UNDO'}
-    key: bpy.props.EnumProperty(items=tuple((k, v[0], v[2]) for k, v in FIELDS.items()))
-    action: bpy.props.EnumProperty(items=(('ADD', 'Set', ''), ('REMOVE', 'Inherit', ''), ('COPY', 'Apply to selected', '')))
-    bulk: bpy.props.BoolProperty(default=False)
-    value: bpy.props.FloatProperty(name='Value', default=1.0, min=0.0)
+    # This is a one-shot Add button, not an adjustable last operation. Blender
+    # redo would undo to an older selection before re-executing its modes.
+    bl_options = {'UNDO'}
+    key: bpy.props.EnumProperty(items=tuple((k, v[0], v[2]) for k, v in FIELDS.items()), options={'HIDDEN'})
+    # Retain scripted calls, but expose no modes or multi-object actions in UI.
+    action: bpy.props.EnumProperty(items=(('ADD', 'Add', ''), ('REMOVE', 'Remove', ''), ('COPY', 'Copy', '')), options={'HIDDEN'})
+    bulk: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
+    value: bpy.props.FloatProperty(name='Value', default=1.0, min=0.0, options={'HIDDEN'})
+    target_uid: bpy.props.StringProperty(options={'HIDDEN'})
 
     @classmethod
     def description(cls, _context, properties):
@@ -139,7 +144,7 @@ class PMVR_OT_PlatformProperty(bpy.types.Operator):
             return f'Apply this {label.lower()} to compatible selected original sources, replacing their current values'
         if properties.action == 'REMOVE':
             return f'Remove the {label.lower()} override and use the material or platform default'
-        return f'Set {label.lower()} on the original source; existing values are kept'
+        return f'Add {label.lower()} on this source, then edit its value here; existing values are kept'
 
     @classmethod
     def poll(cls, context):
@@ -148,6 +153,9 @@ class PMVR_OT_PlatformProperty(bpy.types.Operator):
     def execute(self, context):
         project = context.scene.pm_vr_project
         active = context.scene if self.key == 'reflectionIntensity' else source_object(context.object)
+        if self.target_uid and (not active or str(active.session_uid) != self.target_uid):
+            self.report({'WARNING'}, 'The selected object changed; add the property on its current row')
+            return {'CANCELLED'}
         objects = [active]
         if self.bulk and self.key != 'reflectionIntensity':
             objects = list({o.as_pointer(): o for selected in context.selected_objects
@@ -178,9 +186,6 @@ class PMVR_OT_PlatformProperty(bpy.types.Operator):
         return {'FINISHED'}
 
     def invoke(self, context, _event):
-        obj = source_object(context.object)
-        if self.action == 'ADD' and self.key == 'opacity' and obj and fallback(obj, self.key) is None:
-            return context.window_manager.invoke_props_dialog(self, width=350)
         return self.execute(context)
 
 
@@ -567,28 +572,19 @@ def draw_property(layout, context, obj, key):
             row.prop(obj, '["' + key + '"]', text=FIELDS[key][0])
         else:
             row.label(text=FIELDS[key][0] + ': invalid value type', icon='ERROR')
-        op = row.operator('pmvr.platform_property', text='', icon='X')
-        op.key, op.action = key, 'REMOVE'
-        if key != 'reflectionIntensity' and len(context.selected_objects) > 1 and valid:
-            op = row.operator('pmvr.platform_property', text='', icon='COPYDOWN')
-            op.key, op.action, op.bulk = key, 'COPY', True
     else:
-        default = fallback(obj, key)
-        inherited = 'alphabetical' if key == 'order' else str(default)
-        layer = find_layer(context.scene.pm_vr_project, obj.pm_vr_pipeline.render_layer_id) if key == 'opacity' else None
-        if layer and layer.layer_type == 'GLASS':
-            inherited = 'from material' + (f' ({default:g})' if default is not None else '')
-        row.label(text=FIELDS[key][0] + ': ' + inherited)
-        op = row.operator('pmvr.platform_property', text='Set')
+        row.label(text=FIELDS[key][0])
+        op = row.operator('pmvr.platform_property', text='Add', icon='ADD')
         op.key, op.action = key, 'ADD'
+        op.target_uid = str(obj.session_uid)
 
 
 def draw_runtime(layout, context, project, obj):
-    box = layout.box()
+    box = section(layout, 'pmvr_setup_runtime', 'Runtime', 'EMPTY_AXIS')
+    if box is None:
+        return
     box.enabled = not project.operation_running
-    header = box.row(align=True)
-    header.label(text='Runtime', icon='EMPTY_AXIS')
-    header.operator('pmvr.check_runtime', text='Check', icon='CHECKMARK')
+    box.operator('pmvr.check_runtime', text='Check Runtime', icon='CHECKMARK')
     box.operator('pmvr.runtime_role', text='Create Runtime', icon='ADD').create = True
     if obj and not obj.pm_vr_pipeline.bake_unit_id:
         box.operator('pmvr.runtime_role', text='Set Runtime role / name', icon='SORTALPHA')
@@ -599,9 +595,10 @@ def draw_runtime(layout, context, project, obj):
 
 
 def draw_properties(layout, context, project, obj):
-    box = layout.box()
+    box = section(layout, 'pmvr_setup_properties', 'Object Properties', 'PROPERTIES', default_closed=False)
+    if box is None:
+        return
     box.enabled = not project.operation_running
-    box.label(text='Object Properties', icon='PROPERTIES')
     if context.object and context.object.get(TAG_GENERATED) and obj is None:
         box.label(text='Cannot find a unique original source', icon='ERROR')
     elif obj is None:
@@ -615,8 +612,6 @@ def draw_properties(layout, context, project, obj):
             body.enabled = editable(obj)
             for key in fields:
                 draw_property(body, context, obj, key)
-            if len(context.selected_objects) > 1:
-                body.label(text='Copy arrow applies this value to compatible selected sources', icon='INFO')
         else:
             box.label(text='No platform properties for this layer')
 

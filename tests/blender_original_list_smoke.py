@@ -23,6 +23,11 @@ class Layout:
         self.records.append(('box', block))
         return Layout(self.records, block)
 
+    def panel(self, identifier, **kwargs):
+        self.records.append(('panel', identifier, kwargs.get('default_closed', False)))
+        box = self.box()
+        return box, box
+
     def row(self, **kwargs):
         return self
 
@@ -52,6 +57,19 @@ class Layout:
 
     def separator(self, **kwargs):
         pass
+
+
+class ClosedLayout(Layout):
+    def box(self):
+        block = []
+        self.records.append(('box', block))
+        return ClosedLayout(self.records, block)
+
+    def panel(self, identifier, **kwargs):
+        closed = kwargs.get('default_closed', False)
+        self.records.append(('panel', identifier, closed))
+        box = self.box()
+        return box, None if closed else box
 
 
 def select(*objects):
@@ -96,6 +114,23 @@ def main():
     assert bpy.context.object == glass and bpy.context.selected_objects == [glass]
     assert project.preview_mode == 'SOURCES' and not glass.hide_get()
     assert selection_sync.original_object(project) == glass
+    # Adding a property has no redo modes and affects the active source only.
+    from PM_VR.modules.pipeline.authoring import PMVR_OT_PlatformProperty
+    assert 'REGISTER' not in PMVR_OT_PlatformProperty.bl_options
+    props = bpy.ops.pmvr.platform_property.get_rna_type().properties
+    assert all(props[key].is_hidden for key in ('key', 'action', 'bulk', 'value', 'target_uid'))
+    missing, untouched = made['GLASS'][4:6]
+    select(missing, untouched)
+    before_selection = set(bpy.context.selected_objects)
+    assert bpy.ops.pmvr.platform_property('INVOKE_DEFAULT', key='opacity', target_uid=str(missing.session_uid)) == {'FINISHED'}
+    assert missing['opacity'] == 1 and 'opacity' not in untouched
+    assert set(bpy.context.selected_objects) == before_selection and bpy.context.object == missing
+    missing['opacity'] = .27
+    assert bpy.ops.pmvr.platform_property('INVOKE_DEFAULT', key='opacity', target_uid=str(missing.session_uid)) == {'FINISHED'}
+    assert abs(missing['opacity'] - .27) < 1e-6, 'Add replaced an existing value'
+    select(glass)
+    assert bpy.ops.pmvr.platform_property('INVOKE_DEFAULT', key='opacity', target_uid=str(missing.session_uid)) == {'CANCELLED'}
+    assert bpy.context.object == glass and abs(glass['opacity'] - .18) < 1e-6
     glass.name = 'AAAA_RenamedGlass'
     assert project.active_original_object_index == bpy.data.objects.find(glass.name)
     select(glass, made['GLASS'][0])
@@ -148,6 +183,26 @@ def main():
     for obj, source_id, layer_id, role, render in before:
         assert (obj.pm_vr_pipeline.source_id, obj.pm_vr_pipeline.render_layer_id,
                 obj.pm_vr_pipeline.processing_role, obj.hide_render) == (source_id, layer_id, role, render)
+    # Folding secondary sections must never hide the work lists or Bake button.
+    for stage in ('SETUP', 'BAKE'):
+        bpy.context.scene.pm_vr_ui_state.stage = stage
+        layout = ClosedLayout()
+        pipeline.draw_stage(layout, bpy.context, stage)
+        records = layout.records
+        panels = {r[1]: r[2] for r in records if r[0] == 'panel'}
+        ops = [r[1] for r in records if r[0] == 'op']
+        lists = [r[1] for r in records if r[0] == 'list']
+        if stage == 'SETUP':
+            assert 'PMVR_UL_RenderLayers' in lists and 'PMVR_UL_OriginalObjects' in lists
+            assert panels['pmvr_setup_runtime'] and panels['pmvr_setup_viewport']
+            assert not panels['pmvr_setup_properties']
+            assert 'pmvr.runtime_role' not in ops
+        else:
+            assert 'PMVR_UL_BakeQueue' in lists and 'pmvr.bake_queue' in ops
+            assert all(panels[k] for k in ('pmvr_bake_scenarios', 'pmvr_bake_probes', 'pmvr_bake_viewport'))
+            assert not set(ops) & {'pmvr.add_bake_scenario', 'pmvr.render_probes'}
+            run = next(i for i, r in enumerate(records) if r[0] == 'op' and r[1] == 'pmvr.bake_queue')
+            assert all(i > run for i, r in enumerate(records) if r[0] == 'panel')
     doomed = made['GLASS'][3]
     selection_sync.set_original_object(project, doomed)
     bpy.data.objects.remove(doomed, do_unlink=True)

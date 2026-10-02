@@ -17,6 +17,7 @@ from .identity import (
 from .probes import probe_cameras, probe_directory, probe_states
 from .scenarios import Scope, active_scenario, switched_off_count
 from .variants import variant_problem, variant_status
+from .ui_sections import section
 from .setup_ops import (
     active_layer,
     active_unit,
@@ -262,7 +263,7 @@ def draw_original_objects(layout, project, objects, can_add=True):
     box.label(text=("Objects" if can_add else "Unbaked Objects") + f" ({len(objects)})", icon='OBJECT_DATA')
     row = box.row()
     row.template_list("PMVR_UL_OriginalObjects", "", bpy.data, "objects", project,
-                      "active_original_object_index", rows=6)
+                      "active_original_object_index", rows=min(6, max(2, len(objects))))
     if not objects:
         box.label(text="No objects yet")
     controls = row.column(align=True)
@@ -275,16 +276,16 @@ def draw_original_objects(layout, project, objects, can_add=True):
 
 
 def draw_variants(layout, project, unit):
-    """Material variants of the unit: one small button until there are any."""
+    """Optional unit authoring, outside the always-visible unit work list."""
     layer = find_layer(project, unit.render_layer_id)
-    if not len(unit.variants):
-        if layer and layer.layer_type == 'UNLIT':
-            layout.operator("pmvr.add_bake_variant", text="Add Variant", icon='MATERIAL')
+    if not unit.variants and (not layer or layer.layer_type != 'UNLIT'):
         return
-    box = layout.box()
-    header = box.row(align=True)
-    header.label(text="Material Variants", icon='MATERIAL')
-    header.operator("pmvr.add_bake_variant", text="", icon='ADD')
+    box = section(layout, 'pmvr_setup_variants', 'Material Variants', 'MATERIAL')
+    if box is None:
+        return
+    box.operator("pmvr.add_bake_variant", text="Add Variant", icon='ADD')
+    if not unit.variants:
+        return
     problem = variant_problem(project, unit)
     if problem:
         row = box.row()
@@ -329,8 +330,6 @@ def draw_bake_units(layout, project):
     controls.operator('pmvr.frame_unit', text='', icon='VIEWZOOM')
     controls.separator()
     controls.operator("pmvr.select_all_units_for_resolution", text="", icon='CHECKBOX_HLT')
-    units.label(text="Checked units are edited together.", icon='INFO')
-    units.label(text="+ creates separate units; Shift-click + creates one shared unit.")
     unit = active_unit(project)
     if unit:
         detail = units.column(align=True)
@@ -351,23 +350,13 @@ def draw_bake_units(layout, project):
         row = detail.row(align=True)
         op = row.operator("pmvr.select_pipeline_items", text="Select Sources")
         op.target = 'UNIT_SOURCES'
-        draw_variants(detail, project, unit)
+        draw_variants(layout, project, unit)
 
 
 def draw_scenarios(layout, context, project):
-    box = layout.box()
-    header = box.row(align=True)
-    header.prop(
-        project,
-        "show_bake_scenarios",
-        text="Bake Scenarios",
-        icon='TRIA_DOWN' if project.show_bake_scenarios else 'TRIA_RIGHT',
-        emboss=False,
-    )
-    if not project.show_bake_scenarios:
-        header.label(text=f"{len(project.bake_scenarios)}")
+    body = section(layout, 'pmvr_bake_scenarios', f'Bake Scenarios ({len(project.bake_scenarios)})', 'OUTLINER_COLLECTION')
+    if body is None:
         return
-    body = box.column()
     # Scenario definitions stay fixed while a queue runs.
     body.enabled = not project.operation_running
     row = body.row()
@@ -429,7 +418,6 @@ def draw_bake(layout, context):
     if SHOW_LIGHTMAP or project.bake_mode != 'BEAUTY':
         # A file left in Lightmap mode keeps the switch so it can go back.
         layout.prop(project, "bake_mode", expand=True)
-    draw_scenarios(layout, context, project)
     queue = layout.box()
     mode_label = "Beauty" if project.bake_mode == 'BEAUTY' else "Lightmap"
     queue.label(text=f"{mode_label} Unit Queue", icon='SEQ_STRIP_DUPLICATE')
@@ -482,15 +470,17 @@ def draw_bake(layout, context):
             ),
             icon='RENDER_STILL',
         )
-    draw_probes(layout, project)
     if project.last_operation_summary:
         layout.label(text=project.last_operation_summary, icon='INFO')
-
+    draw_scenarios(layout, context, project)
+    draw_probes(layout, project)
     preview.draw(layout, project)
 
 
 def draw_probes(layout, project):
-    box = layout.box()
+    box = section(layout, 'pmvr_bake_probes', 'Probes', 'WORLD')
+    if box is None:
+        return
     states = probe_states(project)
     cameras = {camera.name for state in states for camera in probe_cameras(project, state)}
     jobs = sum(len(probe_cameras(project, state)) for state in states)

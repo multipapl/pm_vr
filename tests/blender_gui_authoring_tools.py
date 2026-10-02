@@ -8,9 +8,18 @@ import bpy
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import PM_VR
-from PM_VR.modules.pipeline import authoring, setup_ops, ui
+from PM_VR.modules.pipeline import authoring, preview, setup_ops, ui, ui_sections
 
 STATE = {'step': 0, 'draws': {}, 'errors': []}
+
+
+def section(layout, identifier, title, icon='NONE', default_closed=True):
+    body = ui_sections.section(layout, identifier, title, icon, default_closed)
+    STATE.setdefault('sections', {})[identifier] = body is not None
+    return body
+
+
+authoring.section = preview.section = ui.section = section
 
 
 def recording(function, name):
@@ -78,6 +87,9 @@ def tick():
                 bpy.ops.screen.screen_full_area()
         elif step == 1:
             assert STATE['draws'].get('fields'), 'Context fields were never drawn'
+            assert STATE['sections']['pmvr_setup_properties']
+            assert not STATE['sections']['pmvr_setup_runtime']
+            assert not STATE['sections']['pmvr_setup_viewport']
             screenshot = str(Path(tempfile.mkdtemp(prefix='pmvr_setup_ui_')) / 'setup.png')
             bpy.ops.screen.screenshot(filepath=screenshot)
             print('AUTHORING_SETUP_SCREENSHOT', screenshot, flush=True)
@@ -100,7 +112,11 @@ def tick():
             bpy.context.scene.pm_vr_ui_state.stage = 'BAKE'
         elif step == 8:
             assert STATE['draws'].get('bake'), 'Bake stage was never drawn'
+            assert not any(STATE['sections'][key] for key in ('pmvr_bake_scenarios', 'pmvr_bake_probes', 'pmvr_bake_viewport'))
             assert STATE['draws']['fields'] == STATE['setup_draws'], 'Authoring tools drawn in Bake'
+            screenshot = str(Path(tempfile.mkdtemp(prefix='pmvr_bake_ui_')) / 'bake.png')
+            bpy.ops.screen.screenshot(filepath=screenshot)
+            print('AUTHORING_BAKE_SCREENSHOT', screenshot, flush=True)
             bpy.context.scene.pm_vr_ui_state.stage = 'EXPORT'
         elif step == 9:
             assert STATE['draws'].get('export'), 'Export stage was never drawn'

@@ -260,14 +260,24 @@ and `gui-only` runs those cases alone. Detailed logs are kept under
 for verification.
 
 Setup groups **Viewport**, **Runtime** and **Object Properties** into separate
-boxes. Runtime creation/naming/checks and property editing appear only in Setup.
+collapsible sections. Runtime creation/naming/checks and property editing appear only in Setup.
 **Object Properties** shows platform properties for the selected object's semantic
 layer or Runtime role. Selecting a generated mesh edits its named original.
-**Set** adds an optional override without replacing existing values; **X**
-restores inheritance. With multiple objects selected, the copy arrow explicitly
-copies that field to compatible selected originals. Scene reflection strength
-is in Project Settings. SFX/Ambience titles are audio mixer labels, optional and
+Missing parameters have one **Add** button; existing ones are edited directly
+in their value fields. Add affects only the active source and preserves existing
+values and selection. There are no Set/Inherit/Bulk or copy/remove modes in this
+UI. A property that remains absent still uses the material/platform default.
+Add uses the material value if unambiguous, otherwise the usual initial value
+(1 for numeric multipliers/opacity/volume, 0 for order, a suggested title).
+Scene reflection strength is in Project Settings. SFX/Ambience titles are audio mixer labels, optional and
 shared by the numeric instance group; conflicting group values are reported.
+
+Render Layers and object/unit lists in Setup stay open. Viewport, Runtime and
+Material Variants start collapsed; Object Properties starts open but can fold.
+Small original lists take only the rows needed. In Bake, the queue, testing/look
+choices and Bake/Cancel button remain visible first. Bake Scenarios (including
+collections/defaults), Probes and Viewport start collapsed below the queue.
+Expansion is remembered by the sidebar region, without changing scene setup.
 
 **Create Runtime** uses a single role dialog for markers, zones and probes.
 **Set Runtime role / name** names existing meshes and points with a final-name

@@ -561,3 +561,55 @@ and constants.py still match v2.0.0; no signature/schema/legacy-field edits.
 All edits remain in v3 only; production main is clean7e890086. No owner scene,
 Sync/bake folders, normal preferences or running Blender were modified by us.
 Heartbeat remains PAUSED. Restart the isolated Blender_v3.bat to load changes.
+
+## 2026-10-02 — Simple property editing and compact Setup/Bake
+
+Owner reported selection jumping while switching Set/Inherit and requested
+only adding missing applicable fields and editing existing fields in Setup.
+This supersedes all older descriptions of Set/Inherit/Bulk/copy/remove UI.
+
+- Object Properties now has Add for a missing field, or its editable value
+  when present. Only the active original is edited (a uniquely mapped original
+  when generated geometry is selected). Existing values and selection remain.
+  Missing properties still inherit material/platform defaults until Add.
+  Add takes unambiguous material values; otherwise the documented initial
+  numeric value is 1, order is 0 and title is suggested. Linked/ambiguous Glass
+  Alpha is NOT evaluated: its initial opacity is 1, editable immediately.
+- Removed the property mode dialog and adjustable-last-operation registration.
+  Hidden legacy scripted actions remain compatible, but no modes, Bulk, copy
+  or removal buttons appear in UI. The Add button captures target session UID
+  and cancels if its source has changed instead of editing another selection.
+- Native collapsible secondary sections remember expansion in Blender's
+  sidebar region, without adding saved scene settings. Setup layers and
+  object/unit work lists stay visible; small original lists use fewer empty
+  rows. Viewport, Runtime and Material Variants start collapsed. Object
+  Properties starts open for discoverability and can also be collapsed.
+- Bake lighting/look choices, queue, Test and Bake/Cancel stay visible first.
+  Bake Scenarios (all collections/defaults included), Probes and Viewport
+  start collapsed below the queue/operation result. Authoring remains only
+  in Setup. Preview choices fit one horizontal row inside Viewport.
+
+Verification: five targeted background and five real-window cases PASS,
+not a rerun of the preceding full acceptance suite. Background: UI wiring,
+original navigation/property targeting, actual small CPU PBR/Alpha authoring
+bakes and USDZ, export visibility with USDZ/GLB, and variants. Real windows:
+Add/edit/Undo/Redo with linked-opacity Glass and a previously selected PBR
+unit (selection and IDs preserved), real Setup/Bake drawing/default folds and
+Runtime/settings dialogs, unit list operations, actual modal authoring queues
+including partial/all-failed results, and a CPU scenario queue with restoration.
+Repeated Add preserves the value, multi-selection remains intact and only the
+active original receives the field; a stale Add target cancels safely.
+
+Evidence: D:/Blender_Python_v3/_environment/compact_ui_blender_*.log and
+compact_ui_acceptance_summary.json (final commit/push and ten case markers).
+Actual inspected fixture screenshots: _temp/pmvr_setup_ui_t7h0jql4/setup.png
+and _temp/pmvr_bake_ui_uzl_5oo6/bake.png. New real-window property-selection
+case is included in run_tests.bat; existing UI regressions cover folds.
+
+Entire bake_scene.py and constants.py still match v2.0.0. Export membership,
+signature/schema/IDs/legacy fields unchanged. Production main remains clean
+7e890086; original/normal preference hashes were not rechecked in this UI
+follow-up and no own writes target those paths. All own Blender inputs are
+private fixtures, isolated config/temp, CPU; no GPU bake or new full-UniPlace
+export needed. Heartbeat remains PAUSED. Owner restarts only the isolated
+D:/Blender_Python_v3/Blender_v3.bat; ordinary Blender remains v2.0.1.
