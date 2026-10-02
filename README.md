@@ -258,3 +258,32 @@ Run `run_tests.bat` for background regressions; `gui` adds interactive cases,
 and `gui-only` runs those cases alone. Detailed logs are kept under
 `%TEMP%/pmvr_test_logs`. Use a private Blender configuration and temp directory
 for verification.
+
+**Object tools** shows platform properties for the selected object's semantic
+layer or Runtime role. Selecting a generated mesh edits its named original.
+**Set** adds an optional override without replacing existing values; **X**
+restores inheritance. With multiple objects selected, the copy arrow explicitly
+copies that field to compatible selected originals. Scene reflection strength
+is in Project Settings. SFX/Ambience titles are audio mixer labels, optional and
+shared by the numeric instance group; conflicting group values are reported.
+
+**Create Runtime** uses a single role dialog for markers, zones and probes.
+**Set Runtime role / name** names existing meshes and points with a final-name
+preview, known zones/lighting choices and expected media paths. Bake-unit
+members cannot be moved to Runtime by this tool. Sky look choices also set
+their lighting collection, including `_Day` for a Day-only sky; shared skies
+stay outside lighting collections. **Check Runtime** reports naming, type,
+required helper, paired anchor, property and local resource issues; clicking
+an object name selects it. AM remains the final export/placement validator.
+
+Viewport **Sources / Generated / Both** is available in Setup, Bake and Export.
+Sources and Generated are exclusive; Both is a deliberate comparison mode.
+After a queue, Generated + **Last queue only** shows successfully committed
+units; a single-look rebake shows that look. Failed, skipped or interrupted
+old results are excluded. Disable the filter to see all generated results;
+clicking a different unit also releases the filter to select its result.
+The filter changes viewport visibility only, never export membership.
+Click a unit to select its visible members, or use the magnifier to frame it.
+Generated materials select their **PMVR Baked Beauty** node automatically,
+including after loading older saved bakes. None of these tools changes bake
+compatibility signatures or requires an existing-scene rebake.

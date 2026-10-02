@@ -2,6 +2,11 @@
 
 ## v3 development
 
+- Contextual Object Tools edit exact platform properties on originals, including when a generated mesh is selected; inherited values stay optional and multi-selection copying is explicit.
+- One Runtime dialog creates markers, zone boxes and probe cameras or names existing meshes; exact role/zone/look names, object types, conflicts and linked media are checked. Sky look names and collection membership agree.
+- Sources/Generated are exclusive by default; Both is explicit. Finished queues show only committed results in an appropriate look, with a removable Last Queue filter that never limits export.
+- Clicking a Setup or Bake queue unit selects its visible members; reverse selection stays narrow and running bake receiver selection is protected. Find in Viewport frames a unit.
+- Generated Beauty is the active selected texture node for PBR/Alpha and other Beauty materials, including existing saved results; source shaders and bake signatures are unchanged.
 - Help has Artist Rules, Runtime Names and After Bake tabs, with a matching artist guide in docs.
 - Data-only Runtime Zone/Navmesh/Collision meshes do not shade Beauty/Lightmap/probe renders; original visibility and export membership are preserved.
 - Probe Empties export at world positions without camera ancestry; rotated/non-uniformly scaled parents preserve positions in USDZ and GLB.

@@ -1,6 +1,7 @@
 """Keep Setup list navigation synchronized with the active viewport object."""
 
 import bpy
+from contextlib import contextmanager
 from bpy.app.handlers import persistent
 
 from .constants import TAG_GENERATED, TAG_LAYER_ID, TAG_SOURCE_ID, TAG_UNIT_ID
@@ -10,6 +11,56 @@ from .identity import sources_by_id
 _MSGBUS_OWNER = object()
 _timer_pending = False
 _applying = False
+_navigation_depth = 0
+
+
+@contextmanager
+def navigation_guard():
+    global _navigation_depth
+    _navigation_depth += 1
+    try:
+        yield
+    finally:
+        _navigation_depth -= 1
+
+
+def set_index(project, key, value):
+    with navigation_guard():
+        setattr(project, key, value)
+
+
+def list_selected(project, context, queue=False):
+    if _applying or _navigation_depth or project.operation_running:
+        return
+    if not context.view_layer or not context.scene or context.scene.pm_vr_project != project:
+        return
+    if context.object and context.object.mode != 'OBJECT':
+        return
+    items = project.bake_queue if queue else project.bake_units
+    index = project.active_bake_queue_index if queue else project.active_bake_unit_index
+    if index >= len(items):
+        return
+    unit_id = items[index].unit_id
+    from .identity import unit_members
+    from .generated import live_generated_objects
+    from . import preview
+    objects = (live_generated_objects(unit_id, project.bake_mode)
+               if project.show_generated and not project.show_sources else unit_members(unit_id))
+    if objects and project.preview_last_queue and project.show_generated and not any(preview.matches(project, obj) for obj in objects):
+        project.preview_last_queue = False
+    objects = [obj for obj in objects if obj.name in context.view_layer.objects
+               and (not obj.get(TAG_GENERATED) or preview.matches(project, obj))
+               and obj.visible_get(view_layer=context.view_layer)]
+    if not objects:
+        return 0
+    with navigation_guard():
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        for obj in objects:
+            obj.select_set(True)
+        context.view_layer.objects.active = objects[0]
+    _redraw_viewports()
+    return len(objects)
 
 
 def _ownership_for_object(project, obj):
@@ -46,10 +97,10 @@ def _ownership_for_object(project, obj):
 
 def _sync(scene, view_layer):
     ui_state = getattr(scene, "pm_vr_ui_state", None)
-    if ui_state and ui_state.stage != 'SETUP':
+    if ui_state and ui_state.stage not in ('SETUP', 'BAKE'):
         return False
     project = getattr(scene, "pm_vr_project", None)
-    if not project or not project.initialized:
+    if not project or not project.initialized or project.operation_running:
         return False
     obj = view_layer.objects.active
     layer_id, unit_id = _ownership_for_object(project, obj)
@@ -82,6 +133,10 @@ def _sync(scene, view_layer):
         )
         if unit_index is not None and project.active_bake_unit_index != unit_index:
             project.active_bake_unit_index = unit_index
+            changed = True
+        queue_index = next((i for i, item in enumerate(project.bake_queue) if item.unit_id == unit_id), None)
+        if queue_index is not None and project.active_bake_queue_index != queue_index:
+            project.active_bake_queue_index = queue_index
             changed = True
     elif project.active_bake_unit_index != previous_unit_index:
         # Export Original and other non-bake sources navigate the layer list

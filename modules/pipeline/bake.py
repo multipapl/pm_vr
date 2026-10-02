@@ -51,6 +51,7 @@ from .generated import (
 from .identity import find_layer, find_unit, unit_members
 from .scenarios import ScenarioSession, preflight as scenario_preflight
 from .setup_ops import bake_margin, bake_size, lightmap_resolution, preview_state, test_resolution_label
+from . import preview
 from . import log, uv_fill, variants, viewport_overlay
 from .state import activate_state
 from .validation import object_render_visible, validate_unit
@@ -865,6 +866,7 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
         _QUEUE["cancel_requested"] = False
         self._queue_started_at = time.monotonic()
         self._last_save = time.monotonic()
+        self._preview_results = []
         log.info(
             "Bake",
             f"Queue start: {len(project.bake_queue)} unit(s), "
@@ -1063,7 +1065,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                 return result or {'RUNNING_MODAL'}
         ok = False
         try:
+            runtime = self._current_runtime
             self._current_runtime.finish()
+            if not runtime.variant_id:
+                self._preview_results.append(preview.completed(runtime.unit_id, runtime.state, 'BEAUTY', runtime.members))
             self._succeeded += 1
             ok = True
             if self._current_runtime.warnings:
@@ -1244,6 +1249,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             log.warning("Bake", f"Could not remove the denoise compositor scene: {exc}")
         restore_viewport_shading(self._viewport_shading)
         state_label = " + ".join(looks.name(self._project, state) for state in self._states)
+        try:
+            preview.finish(context, self._preview_results, self._original_state)
+        except Exception as exc:
+            log.warning('Bake', f'Could not show completed results: {exc}')
         summary = (
             f"Beauty ({state_label}): {self._succeeded} ready, "
             f"{self._skipped} skipped, {self._failed} failed"
@@ -1314,6 +1323,8 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
                             log.info("Lightmap", f'[{state}] Skipped "{unit.display_name}": fully hidden')
                         else:
                             succeeded += 1
+                            from .identity import unit_members
+                            self._preview_results.append(preview.completed(unit_id, state, 'LIGHTMAP', unit_members(unit_id)))
                             log.info(
                                 "Lightmap",
                                 f'[{state}] Completed "{unit.display_name}" '
@@ -1350,6 +1361,10 @@ class PMVR_OT_BakeQueue(bpy.types.Operator):
             except Exception as exc:
                 log.warning("Bake", f"Could not remove the denoise compositor scene: {exc}")
         state_label = " + ".join(looks.name(project, state) for state in states)
+        try:
+            preview.finish(context, self._preview_results, original_state)
+        except Exception as exc:
+            log.warning('Bake', f'Could not show completed results: {exc}')
         summary = (
             f"Lightmap ({state_label}): {succeeded} ready, "
             f"{skipped} skipped, {failed} failed"

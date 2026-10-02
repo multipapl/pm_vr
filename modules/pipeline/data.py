@@ -27,15 +27,38 @@ def _overlay_updated(_owner, _context):
 
 
 def _show_sources_changed(project, _context):
-    from .setup_ops import preview_sources
-
-    preview_sources(project)
+    from .preview import legacy_changed
+    legacy_changed(project, True)
 
 
 def _show_generated_changed(project, _context):
-    from .setup_ops import preview_generated
+    from .preview import legacy_changed
+    legacy_changed(project, False)
 
-    preview_generated(project)
+
+def _preview_get(project):
+    from .preview import get_mode
+    return get_mode(project)
+
+
+def _preview_set(project, value):
+    from .preview import set_mode
+    set_mode(project, value)
+
+
+def _preview_scope(project, context):
+    from .preview import scope_changed
+    scope_changed(project, context)
+
+
+def _unit_selected(project, context):
+    from .selection_sync import list_selected
+    list_selected(project, context, False)
+
+
+def _queue_selected(project, context):
+    from .selection_sync import list_selected
+    list_selected(project, context, True)
 
 
 def _bake_mode_changed(project, context):
@@ -59,6 +82,12 @@ def _layer_type_changed(layer, context):
 
 
 def _active_layer_changed(project, _context):
+    from .selection_sync import navigation_guard
+    with navigation_guard():
+        _choose_layer_unit(project)
+
+
+def _choose_layer_unit(project):
     if not project.render_layers or not project.bake_units:
         project.active_bake_unit_index = 0
         return
@@ -444,6 +473,13 @@ class PMVR_BuildRecord(bpy.types.PropertyGroup):
     message: bpy.props.StringProperty(name="Message")
 
 
+class PMVR_PreviewResult(bpy.types.PropertyGroup):
+    unit_id: bpy.props.StringProperty()
+    look_id: bpy.props.StringProperty()
+    mode: bpy.props.StringProperty()
+    source_ids: bpy.props.StringProperty()
+
+
 class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     schema_version: bpy.props.IntProperty(name="Schema Version", default=1, min=1)
     initialized: bpy.props.BoolProperty(name="Project Initialized", default=False)
@@ -616,9 +652,9 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     render_layers: bpy.props.CollectionProperty(type=PMVR_RenderLayer)
     active_render_layer_index: bpy.props.IntProperty(default=0, min=0, update=_active_layer_changed)
     bake_units: bpy.props.CollectionProperty(type=PMVR_BakeUnit)
-    active_bake_unit_index: bpy.props.IntProperty(default=0, min=0)
+    active_bake_unit_index: bpy.props.IntProperty(default=0, min=0, update=_unit_selected)
     bake_queue: bpy.props.CollectionProperty(type=PMVR_BakeQueueEntry)
-    active_bake_queue_index: bpy.props.IntProperty(default=0, min=0)
+    active_bake_queue_index: bpy.props.IntProperty(default=0, min=0, update=_queue_selected)
     build_records: bpy.props.CollectionProperty(type=PMVR_BuildRecord)
     bake_scenarios: bpy.props.CollectionProperty(type=PMVR_BakeScenario)
     active_bake_scenario_index: bpy.props.IntProperty(default=0, min=0)
@@ -633,9 +669,17 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     show_generated: bpy.props.BoolProperty(
         name="Show Generated",
         description="Show the baked results of the current bake mode in the viewport",
-        default=True,
+        default=False,
         update=_show_generated_changed,
     )
+    preview_mode: bpy.props.EnumProperty(name='Show', items=(
+        ('SOURCES', 'Sources', 'Show original sources', 0),
+        ('GENERATED', 'Generated', 'Show baked objects', 1),
+        ('BOTH', 'Both', 'Explicitly compare originals and results together', 2),
+    ), get=_preview_get, set=_preview_set)
+    preview_format_version: bpy.props.IntProperty(default=0, options={'HIDDEN'})
+    preview_last_queue: bpy.props.BoolProperty(name='Last queue only', default=False, update=_preview_scope)
+    preview_results: bpy.props.CollectionProperty(type=PMVR_PreviewResult)
     last_validation_summary: bpy.props.StringProperty(name="Validation Summary", options={'SKIP_SAVE'})
     last_operation_summary: bpy.props.StringProperty(name="Operation Summary", options={'SKIP_SAVE'})
     operation_running: bpy.props.BoolProperty(default=False, options={'SKIP_SAVE'})
@@ -654,6 +698,7 @@ CLASSES = (
     PMVR_BakeScenario,
     PMVR_BakeQueueEntry,
     PMVR_BuildRecord,
+    PMVR_PreviewResult,
     PMVR_ProjectSettings,
 )
 

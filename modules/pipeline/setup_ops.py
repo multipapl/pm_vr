@@ -42,6 +42,7 @@ from .identity import (
 from .state import PipelineStateError, activate_state
 from .validation import validate_all
 from . import log, looks, working_directory
+from .selection_sync import set_index
 
 
 SUPPORTED_RESOLUTIONS = tuple(int(item[0]) for item in RESOLUTION_ITEMS)
@@ -108,9 +109,9 @@ def select_layer_unit(project, layer_id, near_index=0):
         if unit.render_layer_id == layer_id
     ]
     if not indices:
-        project.active_bake_unit_index = 0
+        set_index(project, 'active_bake_unit_index', 0)
         return
-    project.active_bake_unit_index = min(indices, key=lambda index: (abs(index - near_index), -index))
+    set_index(project, 'active_bake_unit_index', min(indices, key=lambda index: (abs(index - near_index), -index)))
 
 
 def release_objects(objects):
@@ -208,9 +209,9 @@ def remove_unit(project, unit):
     # Items after the removed one move up; keep the highlight on the same
     # unit, or on its nearest neighbour of the same layer.
     if active_id and active_id != unit_id:
-        project.active_bake_unit_index = next(
+        set_index(project, 'active_bake_unit_index', next(
             i for i, item in enumerate(project.bake_units) if item.unit_id == active_id
-        )
+        ))
     else:
         select_layer_unit(project, layer_id, index)
     return len(generated_objects)
@@ -622,7 +623,7 @@ class PMVR_OT_AddBakeUnit(bpy.types.Operator):
             unit.resolution = suggested_unit_resolution(context, group)
             for obj in group:
                 obj.pm_vr_pipeline.bake_unit_id = unit.unit_id
-            project.active_bake_unit_index = len(project.bake_units) - 1
+            set_index(project, 'active_bake_unit_index', len(project.bake_units) - 1)
         removed = remove_emptied_units(project, left_units)
         mode = "one shared unit" if self.merge_selected else f"{len(groups)} separate unit(s)"
         details = []
@@ -871,7 +872,7 @@ def queue_units(project, unit_ids):
         else:
             already += 1
     if added:
-        project.active_bake_queue_index = len(project.bake_queue) - 1
+        set_index(project, 'active_bake_queue_index', len(project.bake_queue) - 1)
     return added, requeued, already
 
 
@@ -953,7 +954,7 @@ class PMVR_OT_RemoveQueueEntry(bpy.types.Operator):
             return {'CANCELLED'}
         index = min(project.active_bake_queue_index, len(project.bake_queue) - 1)
         project.bake_queue.remove(index)
-        project.active_bake_queue_index = min(index, max(0, len(project.bake_queue) - 1))
+        set_index(project, 'active_bake_queue_index', min(index, max(0, len(project.bake_queue) - 1)))
         return {'FINISHED'}
 
 
@@ -981,7 +982,7 @@ class PMVR_OT_MoveQueueEntry(bpy.types.Operator):
         if target < 0 or target >= len(project.bake_queue):
             return {'CANCELLED'}
         project.bake_queue.move(index, target)
-        project.active_bake_queue_index = target
+        set_index(project, 'active_bake_queue_index', target)
         return {'FINISHED'}
 
 
@@ -1026,6 +1027,7 @@ class PMVR_OT_SetLightingState(bpy.types.Operator):
         # The queue switches states through activate_state() alone; only this
         # button also changes what the baked results show.
         preview_state(context.scene.pm_vr_project)
+        preview_generated(context.scene.pm_vr_project)
         self.report({'INFO'}, f"{looks.name(context.scene.pm_vr_project, self.state)} lighting is active")
         return {'FINISHED'}
 
@@ -1158,9 +1160,10 @@ def preview_sources(project):
 
 def preview_generated(project):
     """Show or hide baked results of the active bake mode (Show Generated)."""
+    from .preview import matches
     for obj in bpy.data.objects:
         if obj.get(TAG_GENERATED):
-            _set_hidden(obj, not (project.show_generated and obj.get(TAG_MODE) == project.bake_mode))
+            _set_hidden(obj, not (project.show_generated and obj.get(TAG_MODE) == project.bake_mode and matches(project, obj)))
 
 
 def preview_state(project):
@@ -1180,6 +1183,31 @@ class PMVR_OT_TogglePreview(bpy.types.Operator):
         preview_generated(project)
         preview_sources(project)
         return {'FINISHED'}
+
+
+class PMVR_OT_FrameUnit(bpy.types.Operator):
+    bl_idname = 'pmvr.frame_unit'
+    bl_label = 'Find in Viewport'
+    bl_description = 'Select the highlighted unit and frame its visible objects'
+    queue: bpy.props.BoolProperty(default=False)
+
+    @classmethod
+    def poll(cls, context):
+        return not context.scene.pm_vr_project.operation_running
+
+    def execute(self, context):
+        from .selection_sync import list_selected
+        selected = list_selected(context.scene.pm_vr_project, context, self.queue)
+        if not selected:
+            self.report({'WARNING'}, 'No visible members in this lighting look; check the View Layer')
+            return {'CANCELLED'}
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                region = next(region for region in area.regions if region.type == 'WINDOW')
+                with context.temp_override(area=area, region=region):
+                    bpy.ops.view3d.view_selected(use_all_regions=False)
+                return {'FINISHED'}
+        return {'CANCELLED'}
 
 
 class PMVR_OT_OpenLogFolder(bpy.types.Operator):
@@ -1234,6 +1262,10 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         export.label(text="Export", icon='EXPORT')
         export.prop(project, "usdz_output_directory")
         export.prop(project, "glb_output_directory")
+        from .authoring import draw_property
+        properties = export.column()
+        properties.enabled = not project.operation_running
+        draw_property(properties, context, context.scene, 'reflectionIntensity')
         probes = layout.box()
         probes.label(text="Probes", icon='WORLD')
         probes.prop(project, 'probe_collection')
@@ -1255,6 +1287,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
 
 
 CLASSES = (
+    PMVR_OT_FrameUnit,
     PMVR_OT_InitializeProject,
     PMVR_OT_AddRenderLayer,
     PMVR_OT_RemoveRenderLayer,

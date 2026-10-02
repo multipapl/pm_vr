@@ -2,6 +2,7 @@
 
 import bpy
 from . import looks
+from . import preview
 
 from .bake_scene import PipelineBakeError
 from .constants import BAKE_LAYER_TYPES
@@ -304,6 +305,7 @@ def draw_bake_units(layout, project):
     controls = row.column(align=True)
     controls.operator("pmvr.add_bake_unit", text="", icon='ADD')
     controls.operator("pmvr.remove_bake_unit", text="", icon='REMOVE')
+    controls.operator('pmvr.frame_unit', text='', icon='VIEWZOOM')
     controls.separator()
     controls.operator("pmvr.select_all_units_for_resolution", text="", icon='CHECKBOX_HLT')
     units.label(text="Checked units are edited together.", icon='INFO')
@@ -414,6 +416,7 @@ def draw_bake(layout, context):
     row.template_list("PMVR_UL_BakeQueue", "", project, "bake_queue", project, "active_bake_queue_index", rows=6)
     controls = row.column(align=True)
     controls.operator("pmvr.remove_queue_entry", text="", icon='REMOVE')
+    controls.operator('pmvr.frame_unit', text='', icon='VIEWZOOM').queue = True
     controls.separator()
     op = controls.operator("pmvr.move_queue_entry", text="", icon='TRIA_UP')
     op.direction = 'UP'
@@ -462,11 +465,7 @@ def draw_bake(layout, context):
     if project.last_operation_summary:
         layout.label(text=project.last_operation_summary, icon='INFO')
 
-    preview = layout.box()
-    preview.label(text="Preview", icon='HIDE_OFF')
-    row = preview.row(align=True)
-    row.prop(project, "show_sources", toggle=True)
-    row.prop(project, "show_generated", toggle=True)
+    preview.draw(layout, project)
 
 
 def draw_probes(layout, project):

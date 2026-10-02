@@ -462,3 +462,55 @@ Detailed logs: D:/Blender_Python_v3/_environment/transition_*.log/.err.
 - Shared document newSHA256 34F5532658BD61491AB8974D45D82166692EADA30F74241A4A391BA1587306E3; priorSHA36AD8ADA...D693 remains historical review of Oct1, not current hash. Write/readback evidence _environment/shared_handoff_write_2026-10-02.json. Added section identical to tracked docs/MAC_HANDOFF_2026-10-02.md (line ending normalization only).
 - Handoff covers implemented export/look/property/probe contracts; intentional2Runtime/11probe differences; default-OFF PBR and16units/30results; no mode marker in signatures/descriptions (Ready or JSON alone does NOT establish diffuse-only readiness); real migration/rollback/full-media comparisons; unresolved original Runtime/glass/translucent/emission authoring; local-only evidence location; first AM/VisionPro checks and backup/external-atlas limits. Original22EXR not automatically invalidated by point-only exports. No Mac agent messaged, no data export/sync/publishing performed.
 - Ordinary Blender still productionv2.0.1 from D:/Blender_Python/addons/PM_VR. Restart does NOT load the isolated v3 folder. Owner uses D:/Blender_Python_v3/Blender_v3.bat for v3. Dev bl_info still2.0.1 until release; identify by branch/path/look list. No switch/main merge authorized by this request. Owner asked for concrete things to inspect, not a production deployment.
+
+## Artist workflow tools complete — 2026-10-02
+
+Owner accepted contextual custom-property UI, clear exclusive Sources/Generated
+preview, list-to-viewport selection and compact Runtime convention tools. Added
+the requirement that generated PBR/Alpha materials select the actual Beauty
+texture rather than their preserved source normal/opacity texture. All changes
+are in v3 only. No release, main merge or original scene authoring authorized.
+
+- New authoring.py: one Object Tools box in Setup/Bake/Export. Exact optional source properties by semantic layer/Runtime role; generated selection resolves a UNIQUE original. Set inherits existing appearance, X removes the override, explicit per-field copy to compatible selected originals. Linked data and active operations protected; existing values preserved. Scene reflectionIntensity in Project Settings. SFX title is an optional audio mixer GROUP label; conflicting group values reported, numeric instances share media.
+- One Runtime dialog creates correctly typed Empty/Zone box/probe camera or names an existing object; type-filtered roles with STABLE enum numbers, exact name preview, zone/look choices, occupied/normalized name checks, singleton StartPosition, numeric music instances. Cannot move a bake-unit member to Runtime. Source IDs preserved on existing objects; no geometry/UV conversion. Probe cameras join the configured collection. Sky-specific names include _Day too and agree with lighting collection membership; All is a truly shared sky. Editing/showing a Runtime original returns Sources view. No automatic media generation/rename or scene-wide conversion.
+- Check Runtime lists type/name/helper/pair/zone/media/probe-panorama/property/group issues; click a name to select. AM still validates final exported completeness/placement. It does not block existing exports. Unknown roles/RK shader geometry are not guessed.
+- preview.py: Sources/Generated exclusive by default, explicit Both. Legacy Both/Neither migrates to Sources; an existing Generated-only choice remains Generated. Active scene view reapplied on load, other scene settings cannot override the current viewport. Preview metadata has its OWN format1, entirely separate from SCHEMA_VERSION.
+- Queue records successful base commits by unit/look/mode/source IDs (not consumed queue entries, old Ready states, variants or skipped jobs). After all evaluation/scenario restoration, show Generated + Last Queue; prefer the former look only if actually committed, otherwise show a freshly baked look. Partial/cancelled queues show only committed results; all-failed queues show ZERO fresh results instead of old successes. Filter can be removed and NEVER limits render/export membership. A visible fresh unit is selected so the Shader Editor follows generated materials instead of a hidden original.
+- List indices select visible source/generated unit members in Setup and Bake; reversed scene selection updates lists without expanding a manual single-object selection. Navigation guards distinguish programmatic target changes from a user's list click; running bake receiver selection never disturbed. Find-in-Viewport magnifier; selecting an out-of-scope generated unit releases last-queue focus.
+- Generated Beauty node is active and uniquely selected on construction, state binding and loading existing editable generated materials. Source shaders untouched. Entire protected bake_scene.py/constants.py still match v2.0.0; no signature/schema/ID/legacy DAY/EVENING changes.
+
+Verification:33 background cases and18 GUI cases validated. Full background
+run had one old variants TEST assuming index assignment preserved a selected
+different source; updated that scripted assignment to the explicit navigation
+guard and reran PASS. All other32 cases passed in the suite. New actual small
+CPU PBR/Alpha bakes, original/normal/opacity node preservation, late property
+edits, safe role creation/scoping, multi-scene preview, save/reopen and actual
+USDZ export with a hidden focused-out mesh PASS. Actual modal two-look queue,
+Evening-only partial and all-failed queues PASS; cancelled/resumed/autosave/
+Image Editor/scenario/probe regressions PASS. New real-window drawing test
+covers contextual custom-property rows and Runtime/check/settings dialogs.
+Final targeted runs after edge fixes PASS; no GPU unit bake was used.
+
+Real existing UniPlace snapshot: save/reopen fingerprint of1314objects,
+893meshes and source/generated/material/UV/ID/legacy records exact, with only
+the expressly allowed legacy Both->Sources switch in Scene.001. Main Scene's
+Generated-only switch retained. Full Day/Evening export14success2expectedskip
+per look,30USDZ+variants manifest+descriptions. ALL30 packages compare EXACT
+to Sync_v3_final, every authored field and embedded media SHA, no allowed
+differences. Final reopen after final view migration changes also PASS.
+
+Evidence: _environment/authoring_acceptance_summary.json (33/18/30),
+authoring_background_suite.log; authoring_final_smoke.log;
+authoring_gui_suite.log; authoring_final_blender_gui_*.log;
+authoring_gui_tools.log; authoring_transition.log;
+authoring_final_reopen.log; authoring_reference_comparison.log.
+Snapshot/Authoring_UniPlace_2026-10-02 contains saved private blend, full USD,
+transition_review.json, Final_reopen/transition_review.json and
+usd_comparison.json. Existing snapshot still originates Oct1 21:48, not a
+fresh capture of today's owner saves. The CURRENT original and normal prefs
+hash/mtime are recorded in authoring_acceptance_summary.json and differ from
+early Oct2 historical provenance; do not claim they still match old E004/B9D
+hashes. All own Blender inputs were private copies/fixtures; original paths
+were read/hashed only. Production main remains clean7e890086. Heartbeat stays
+PAUSED. Owner activates code by restarting the isolated Blender_v3.bat;
+ordinary Blender remains production v2.0.1.

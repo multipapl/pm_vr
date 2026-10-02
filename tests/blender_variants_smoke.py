@@ -283,7 +283,10 @@ def main():
     bpy.ops.object.select_all(action='DESELECT')
     pbr_obj.select_set(True)
     bpy.context.view_layer.objects.active = pbr_obj
-    project.active_bake_unit_index = list(project.bake_units).index(unit)
+    # Programmatic target navigation must not act like the user's list click,
+    # which now deliberately selects the unit's existing members.
+    from PM_VR.modules.pipeline.selection_sync import set_index
+    set_index(project, 'active_bake_unit_index', list(project.bake_units).index(unit))
     bpy.ops.pmvr.assign_selected_to_unit()
     check("one object" in variants.variant_problem(project, unit), variants.variant_problem(project, unit))
 

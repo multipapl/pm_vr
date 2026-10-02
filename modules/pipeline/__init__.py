@@ -4,6 +4,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import (
+    authoring,
     bake,
     bake_scene,
     data,
@@ -13,6 +14,7 @@ from . import (
     log,
     looks,
     probes,
+    preview,
     scenarios,
     scene_debug,
     selection_sync,
@@ -55,6 +57,9 @@ def _load_post(_filepath):
     setup_ops.reset_test_resolution()
     scenarios.prune_scenarios()
     scenarios.sync_scenarios(force=True)
+    for scene in bpy.data.scenes:
+        if scene.pm_vr_project.initialized:
+            preview.migrate(scene.pm_vr_project)
 
 
 @persistent
@@ -66,6 +71,7 @@ def _save_post(_filepath):
 
 
 def _settle_generated_uvs():
+    generated.settle_baked_textures()
     switched, pinned = generated.settle_generated_uvs()
     if switched or pinned:
         log.info(
@@ -109,7 +115,7 @@ _HANDLERS = (
 
 
 def register():
-    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *looks.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES):
+    for cls in (*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *looks.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES, *authoring.CLASSES):
         bpy.utils.register_class(cls)
     data.register_properties()
     selection_sync.register()
@@ -132,6 +138,9 @@ def register():
         setup_ops.cap_removed_resolutions()
         scenarios.prune_scenarios()
         scenarios.sync_scenarios(force=True)
+        for scene in bpy.data.scenes:
+            if scene.pm_vr_project.initialized:
+                preview.migrate(scene.pm_vr_project)
     except AttributeError:
         # bpy.data is restricted while add-ons register at startup; the
         # load_post handler covers the file that is opened next.
@@ -149,7 +158,7 @@ def unregister():
     viewport_overlay.unregister()
     selection_sync.unregister()
     data.unregister_properties()
-    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *looks.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES)):
+    for cls in reversed((*data.CLASSES, *ui.CLASSES, *setup_ops.CLASSES, *looks.CLASSES, *scenarios.CLASSES, *bake.CLASSES, *export.CLASSES, *variants.CLASSES, *probes.CLASSES, *authoring.CLASSES)):
         bpy.utils.unregister_class(cls)
 
 
@@ -160,6 +169,7 @@ def draw_stage(layout, context, stage):
         ui.draw_bake(layout, context)
     elif stage == 'EXPORT':
         ui.draw_export(layout, context)
+    authoring.draw(layout, context)
 
 
 def draw_scene_debug(layout, context):

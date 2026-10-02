@@ -76,6 +76,24 @@ def _new_uv_and_image_nodes(material, image, principled):
                     tree.links.remove(link)
                 tree.links.new(primary_uv.outputs["UV"], vector)
     pin_normal_maps(material)
+    activate_baked_texture(material)
+
+
+def activate_baked_texture(material):
+    tree = material.node_tree
+    node = tree.nodes.get('PMVR Baked Beauty') if tree else None
+    if not node or node.type != 'TEX_IMAGE':
+        return False
+    for item in tree.nodes:
+        item.select = item == node
+    tree.nodes.active = node
+    return True
+
+
+def settle_baked_textures():
+    for material in bpy.data.materials:
+        if material.get(TAG_GENERATED) and material.is_editable:
+            activate_baked_texture(material)
 
 
 def pin_normal_maps(material):
@@ -329,6 +347,8 @@ def bind_generated_state(unit, state, mode='BEAUTY', strict=False):
                     f"rebake this lighting look"
                 )
             _assign_materials_in_place(obj.data, materials)
+            for material in materials:
+                activate_baked_texture(material)
         except PipelineBakeError as exc:
             if strict:
                 raise PipelineBakeError(f"{obj.name}: {exc}") from exc
