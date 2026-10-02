@@ -12,9 +12,9 @@ goes into the manifest when present), and an Empty
 named VariantMarker in the file for the button.
 """
 
-import json
 import os
 import re
+from pathlib import Path
 
 import bpy
 from . import looks
@@ -115,16 +115,18 @@ def swatch_path(entity, variant=None):
     return f"{FOLDER}/{entity}_{variant_stem(variant)}_swatch.jpg" if variant else f"{FOLDER}/{entity}_swatch.jpg"
 
 
-def manifest_entry(unit, entity, staging):
+def manifest_entry(unit, entity, staging, project=None):
     """The materialVariants record of one object, or None when fewer than
     two options exist (the Day file of a variant is its model)."""
     options = [{"id": "default", "title": unit.variant_default_title.strip()}]
     if os.path.exists(os.path.join(staging, swatch_path(entity))):
         options[0]["swatch"] = swatch_path(entity)
     ids = {"default"}
+    project = project or bpy.context.scene.pm_vr_project
+    state = looks.default_id(project)
     for variant in unit.variants:
-        model = model_path(entity, variant, looks.default_id(bpy.context.scene.pm_vr_project))
-        if not os.path.exists(os.path.join(staging, model)):
+        model = model_path(entity, variant, state, project)
+        if variant_status(unit, variant, state) != 'Ready' or not os.path.exists(os.path.join(staging, model)):
             continue
         option_id = _slug(variant.title)
         while option_id in ids:
@@ -146,9 +148,8 @@ def write_manifest(staging, entries):
         ids.add(entry["id"])
     path = os.path.join(staging, FOLDER, MANIFEST)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump({"materialVariants": entries}, handle, indent=2, ensure_ascii=False)
-        handle.write("\n")
+    from .export_description import _atomic_json
+    _atomic_json(Path(path), {"materialVariants": entries})
     return path
 
 

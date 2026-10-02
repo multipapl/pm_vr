@@ -14,7 +14,7 @@ from pxr import Sdf, Usd
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import PM_VR
 PM_VR.register()
-from PM_VR.modules.pipeline import bake, export, export_description, generated, platform, variants
+from PM_VR.modules.pipeline import bake, export, export_description, generated, looks, platform, variants
 from PM_VR.modules.pipeline.identity import new_id
 from PM_VR.modules.pipeline.state import activate_state
 
@@ -111,6 +111,22 @@ assert doc['schema'] == 1 and doc['look']['id'] == 'DAY' and doc['look']['defaul
 assert doc['settings'] == {'reflectionIntensity': 1.7}
 assert {item['file'] for item in doc['files']} == {'Cloth.usdz', 'Glass.usdz'}
 
+# Renaming the DEFAULT look keeps filenames: a partial export must retain
+# other committed layers from its previous descriptor, then remove the old JSON.
+looks.find(project, 'DAY').display_name = 'Morning'
+export.export_semantic_layer(bpy.context, glass_layer, 'USDZ')
+assert {item['file'] for item in description('Morning')['files']} == {'Cloth.usdz', 'Glass.usdz'}
+assert not (output / 'PMVR_Export_Day.json').exists()
+looks.find(project, 'DAY').display_name = 'Day'
+export_description.write(project, 'DAY')
+assert {item['file'] for item in description()['files']} == {'Cloth.usdz', 'Glass.usdz'}
+
+# Unrelated malformed metadata does not break an otherwise valid export.
+malformed = output / 'PMVR_Export_NotOurs.json'
+malformed.write_text('[]', encoding='utf-8')
+export_description.write(project, 'DAY')
+assert malformed.read_text() == '[]'
+
 unit.variant_material = source.material_slots[0].material
 unit.variant_group_title = 'Камінь'
 variant = unit.variants.add()
@@ -156,6 +172,11 @@ activate_state(bpy.context, 'EVENING')
 export.export_semantic_layer(bpy.context, glass_layer, 'USDZ')
 assert description('Evening')['look'] == {'id': 'EVENING', 'name': 'Evening', 'suffix': '_Evening', 'default': False}
 assert [item['file'] for item in description('Evening')['files']] == ['Glass_Evening.usdz']
+activate_state(bpy.context, 'DAY')
+project.lighting_looks.remove(next(i for i, item in enumerate(project.lighting_looks) if item.look_id == 'EVENING'))
+export_description.write(project, 'DAY')
+assert not (output / 'PMVR_Export_Evening.json').exists(), 'Removed look remained discoverable'
+assert (output / 'Glass_Evening.usdz').is_file(), 'Metadata cleanup removed an owner package'
 unknown = bpy.data.objects.new('Cube_Authoring', None)
 root.objects.link(unknown)
 unknown_before = unknown.name, dict(unknown.items())

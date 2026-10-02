@@ -3,17 +3,21 @@ from pathlib import Path
 
 import bpy
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 NEW_DEFAULTS = {
     'beauty_output_directory': '//PMVR/Bakes/',
     'flattened_output_directory': '//PMVR/Flattened/',
     'log_output_directory': '//PMVR/Logs/',
     'probe_preview_directory': '//PMVR/ProbePreviews/',
+    'lightmap_output_directory': '//PMVR/Lightmaps/',
+    'external_texture_directory': '//PMVR/Textures/',
 }
 LEGACY_DEFAULTS = {
     'beauty_output_directory': '//Beauty_Bakes/',
     'flattened_output_directory': '//PMVR_Flattened/',
     'log_output_directory': '//PMVR_Logs/',
+    'lightmap_output_directory': '//Lightmaps/',
+    'external_texture_directory': '//PM_Selected_Textures/',
 }
 
 
@@ -26,8 +30,14 @@ def migrate(project):
         for field, value in LEGACY_DEFAULTS.items():
             if not project.is_property_set(field):
                 setattr(project, field, value)
-        project.working_directory_version = FORMAT_VERSION
         project.legacy_working_directory = True
+    if project.initialized and project.working_directory_version < FORMAT_VERSION:
+        # Earlier v3 also had an implicit //Lightmaps RNA default. Pin it
+        # before adopting the new PMVR/Lightmaps default for NEW projects.
+        for field in ('lightmap_output_directory', 'external_texture_directory'):
+            if not project.is_property_set(field):
+                setattr(project, field, LEGACY_DEFAULTS[field])
+        project.working_directory_version = FORMAT_VERSION
 
 
 def ensure_new_folders(project):
@@ -37,7 +47,7 @@ def ensure_new_folders(project):
     if project.legacy_working_directory:
         return
     root = Path(bpy.data.filepath).parent / 'PMVR'
-    for name in ('Bakes', 'Flattened', 'Logs', 'ProbePreviews'):
+    for name in ('Bakes', 'Flattened', 'Logs', 'ProbePreviews', 'Lightmaps', 'Textures'):
         (root / name).mkdir(parents=True, exist_ok=True)
 
 

@@ -392,7 +392,7 @@ def write_variant_manifest(project):
         if variants.variant_problem(project, unit):
             continue
         generated = _unit_generated(project, unit, index)
-        entry = generated and variants.manifest_entry(unit, variants.usd_name(generated.name), staging)
+        entry = generated and variants.manifest_entry(unit, variants.usd_name(generated.name), staging, project)
         if entry:
             entries.append(entry)
     if not entries and not os.path.isdir(os.path.join(staging, variants.FOLDER)):
@@ -572,10 +572,15 @@ class PMVR_OT_ExportSemanticLayers(bpy.types.Operator):
         if scaled:
             log.info("Export", f"Atlases scaled to unit resolution: {scaled}")
         if 'USDZ' in formats:
-            manifest = write_variant_manifest(project)
-            if manifest:
-                log.info("Export", f"Material variants: {manifest[1]} object(s) -> {manifest[0]}")
-            export_description.write(project, looks.active_id(project))
+            try:
+                manifest = write_variant_manifest(project)
+                if manifest:
+                    log.info("Export", f"Material variants: {manifest[1]} object(s) -> {manifest[0]}")
+                export_description.write(project, looks.active_id(project))
+            except Exception as exc:
+                failed += 1
+                first_error = first_error or f'Export metadata: {exc}'
+                log.error('Export', f'Could not publish final metadata: {exc}', with_traceback=True)
         summary = f"Export: {succeeded} ready, {skipped} skipped, {failed} failed"
         if cancelled:
             summary += ", cancelled"

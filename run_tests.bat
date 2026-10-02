@@ -18,6 +18,7 @@ if /I not "%~1"=="gui" goto :results
     call :run "%~dp0tests\blender_gui_authoring_tools.py" simulate
     call :run "%~dp0tests\blender_gui_original_list.py" simulate
     call :run "%~dp0tests\blender_gui_property_selection.py" simulate
+    call :run "%~dp0tests\blender_gui_folder_organization.py" simulate
     call :run "%~dp0tests\blender_gui_bake_cancel.py" simulate esc
     call :run "%~dp0tests\blender_gui_bake_cancel.py" simulate button
     call :run "%~dp0tests\blender_gui_selection_sync.py" window

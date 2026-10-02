@@ -646,9 +646,10 @@ class PMVR_ProjectSettings(bpy.types.PropertyGroup):
     )
     beauty_output_directory: bpy.props.StringProperty(name="Beauty Directory", subtype='DIR_PATH', default="//PMVR/Bakes/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     flattened_output_directory: bpy.props.StringProperty(name="Flattened Directory", subtype='DIR_PATH', default="//PMVR/Flattened/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    external_texture_directory: bpy.props.StringProperty(name="Externalized Textures", subtype='DIR_PATH', default="//PMVR/Textures/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     log_output_directory: bpy.props.StringProperty(name="Log Directory", subtype='DIR_PATH', default="//PMVR/Logs/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     probe_preview_directory: bpy.props.StringProperty(name="Probe Preview Directory", subtype='DIR_PATH', default="//PMVR/ProbePreviews/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
-    lightmap_output_directory: bpy.props.StringProperty(name="Lightmap Directory", subtype='DIR_PATH', default="//Lightmaps/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
+    lightmap_output_directory: bpy.props.StringProperty(name="Lightmap Directory", subtype='DIR_PATH', default="//PMVR/Lightmaps/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     usdz_output_directory: bpy.props.StringProperty(name="USDZ Directory", subtype='DIR_PATH', default="//USDZ/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     glb_output_directory: bpy.props.StringProperty(name="GLB Directory", subtype='DIR_PATH', default="//GLB/", options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     probe_output_directory: bpy.props.StringProperty(

@@ -56,6 +56,7 @@ class PM_LightmapSettings(bpy.types.PropertyGroup):
         name="Output Directory",
         subtype='DIR_PATH',
         default="//Lightmaps/",
+        options={'PATH_SUPPORTS_BLEND_RELATIVE'},
     )
 
 

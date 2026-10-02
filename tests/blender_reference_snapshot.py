@@ -83,6 +83,9 @@ for scene in bpy.data.scenes:
     project = scene.pm_vr_project
     for field, folder in (('beauty_output_directory', 'Beauty_Bakes'),
                           ('lightmap_output_directory', 'Lightmaps'),
+                          ('flattened_output_directory', 'PMVR_Flattened'),
+                          ('log_output_directory', 'PMVR_Logs'),
+                          ('probe_preview_directory', 'PMVR/ProbePreviews'),
                           ('usdz_output_directory', args.sync_name + '/USD'),
                           ('glb_output_directory', args.sync_name + '/GLB'),
                           ('probe_output_directory', args.sync_name + '/probes')):

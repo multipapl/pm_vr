@@ -1233,7 +1233,9 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
     def draw(self, context):
         project = context.scene.pm_vr_project
         layout = self.layout
-        layout.prop(project, "source_root_collection")
+        source = layout.row()
+        source.enabled = not project.operation_running
+        source.prop(project, "source_root_collection")
         lighting = layout.box()
         lighting.enabled = not project.operation_running
         lighting.label(text="Lighting", icon='LIGHT')
@@ -1247,6 +1249,7 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
             lighting.prop(look, 'world')
         lighting.operator('pmvr.add_lighting_look', icon='ADD')
         bake = layout.box()
+        bake.enabled = not project.operation_running
         bake.label(text="Bake Defaults", icon='RENDER_STILL')
         bake.prop(project, "bake_resolution")
         bake.prop(project, "default_unit_resolution")
@@ -1262,7 +1265,9 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         bake.prop(project, "beauty_output_directory")
         bake.prop(project, "lightmap_output_directory")
         bake.prop(project, "flattened_output_directory")
+        bake.prop(project, 'external_texture_directory')
         export = layout.box()
+        export.enabled = not project.operation_running
         export.label(text="Export", icon='EXPORT')
         export.prop(project, "usdz_output_directory")
         export.prop(project, "glb_output_directory")
@@ -1271,16 +1276,23 @@ class PMVR_OT_ProjectSettings(bpy.types.Operator):
         properties.enabled = not project.operation_running
         draw_property(properties, context, context.scene, 'reflectionIntensity')
         probes = layout.box()
+        probes.enabled = not project.operation_running
         probes.label(text="Probes", icon='WORLD')
         probes.prop(project, 'probe_collection')
         probes.prop(project, "probe_output_directory")
         probes.prop(project, "probe_preview_directory")
         probes.prop(project, "probe_width")
         log_box = layout.box()
-        log_box.prop(project, "log_output_directory")
+        log_path = log_box.row()
+        log_path.enabled = not project.operation_running
+        log_path.prop(project, "log_output_directory")
         log_box.label(text="Log", icon='TEXT')
         log_box.label(text=log.log_file_path())
         log_box.operator("pmvr.open_log_folder", icon='FILEBROWSER')
+        maintenance = layout.box()
+        maintenance.label(text='Local Files', icon='FILE_FOLDER')
+        maintenance.operator('pmvr.organize_project_folders', icon='FILE_REFRESH')
+        maintenance.label(text='Legacy folders -> PMVR; verified backup kept')
         layout.label(text=f"Schema {project.schema_version}  •  Project {project.project_id[:8] or 'not initialized'}")
 
     def invoke(self, context, _event):

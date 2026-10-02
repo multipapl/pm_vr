@@ -65,6 +65,21 @@ def main():
         assert bpy.ops.pm_vr.fix_uv_channels(scope='SELECTED') == {'FINISHED'}
         assert bpy.ops.pm_vr.audit_recheck_active() == {'FINISHED'}
         assert len(bpy.context.scene.pm_vr_audit_results) == 0
+        # Optimize must not rename a platform shader or reject valid Runtime
+        # role names as old PascalCase/mesh-material name conventions.
+        from PM_VR.modules import vr_project_tools
+        shader = obj.data.materials[0]
+        shader.name = 'RK_Water'
+        obj.name = 'Water_Custom.001'
+        assert bpy.ops.pm_vr.sync_names_from_objects(scope='SELECTED') == {'FINISHED'}
+        assert obj.data.materials[0] == shader and shader.name == 'RK_Water'
+        assert not vr_project_tools.naming_issue_keys(obj)
+        shader.name = 'Ordinary material'
+        layer = bpy.context.scene.pm_vr_project.render_layers.add()
+        layer.layer_id, layer.layer_type = 'runtime-operator-test', 'RUNTIME'
+        obj.pm_vr_pipeline.render_layer_id = layer.layer_id
+        obj.name = 'Zone_Test'
+        assert not vr_project_tools.naming_issue_keys(obj)
         print("PM_VR_OPERATOR_SMOKE_OK")
     finally:
         PM_VR.unregister()

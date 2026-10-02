@@ -264,6 +264,11 @@ def load_image_replacement(filepath, color_space):
 def get_selected_texture_export_directory():
     if not bpy.data.filepath:
         return ""
+    project = getattr(bpy.context.scene, 'pm_vr_project', None)
+    if project is not None:
+        from .pipeline.working_directory import migrate
+        migrate(project)
+        return bpy.path.abspath(project.external_texture_directory)
     return os.path.join(os.path.dirname(bpy.data.filepath), EXTERNAL_TEXTURE_FOLDER_NAME)
 
 
@@ -362,6 +367,8 @@ def ensure_single_material_from_object(obj):
         return True, "created", removed_empty
 
     material = materials[0]
+    if material.name.startswith('RK_'):
+        return True, 'runtime_shader_preserved', removed_empty
     if count_material_object_users(material) > 1:
         material = material.copy()
         obj.material_slots[0].material = material
@@ -381,6 +388,7 @@ def sync_names_from_objects(objects):
     skipped_multiple_materials = []
     skipped_name_collisions = []
     removed_empty_slots = 0
+    preserved_runtime_materials = 0
 
     for obj in objects:
         if obj.data and obj.data.users > 1:
@@ -404,7 +412,10 @@ def sync_names_from_objects(objects):
                 skipped_name_collisions.append(obj.name)
             continue
 
-        synced_materials += 1
+        if _status == 'runtime_shader_preserved':
+            preserved_runtime_materials += 1
+        else:
+            synced_materials += 1
 
     return {
         "made_mesh_single_user": made_mesh_single_user,
@@ -413,6 +424,7 @@ def sync_names_from_objects(objects):
         "skipped_multiple_materials": skipped_multiple_materials,
         "skipped_name_collisions": skipped_name_collisions,
         "removed_empty_slots": removed_empty_slots,
+        'preserved_runtime_materials': preserved_runtime_materials,
     }
 
 
@@ -499,7 +511,19 @@ def objects_with_invalid_uv_channels(objects):
     return [obj for obj in objects if not has_valid_uv_channels(obj.data)]
 
 
+def _has_platform_names(obj):
+    if any(material.name.startswith('RK_') for material in get_non_empty_materials(obj)):
+        return True
+    meta = getattr(obj, 'pm_vr_pipeline', None)
+    return bool(meta and meta.render_layer_id and any(
+        layer.layer_id == meta.render_layer_id and layer.layer_type == 'RUNTIME'
+        for scene in bpy.data.scenes if hasattr(scene, 'pm_vr_project')
+        for layer in scene.pm_vr_project.render_layers))
+
+
 def naming_issue_keys(obj):
+    if _has_platform_names(obj):
+        return []
     issues = []
     if not is_pascal_case_name(obj.name) or BLENDER_DUPLICATE_SUFFIX_PATTERN.match(obj.name):
         issues.append("bad_object_names")
@@ -962,6 +986,8 @@ class PM_OT_VR_SyncNamesFromObjects(bpy.types.Operator):
             f"synced {result['synced_meshes']} mesh names, "
             f"{result['synced_materials']} materials"
         )
+        if result['preserved_runtime_materials']:
+            message += f"; preserved {result['preserved_runtime_materials']} RK shader name(s)"
         skipped_total = len(skipped) + len(collisions)
         if skipped_total:
             self.report({'WARNING'}, f"{message}; skipped {skipped_total} object(s)")

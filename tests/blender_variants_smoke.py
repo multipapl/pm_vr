@@ -276,6 +276,18 @@ def main():
     bpy.ops.pmvr.export_semantic_layers(export_format='USDZ')
     after = json.load(open(os.path.join(folder, "materialVariants.json"), encoding="utf-8"))
     check(after == before and after["materialVariants"], f"partial export rewrote the manifest: {after}")
+    # An old package on disk must not advertise a variant whose current bake
+    # is missing or structurally incompatible; leave owner-made files alone.
+    original_signature = blue.day_signature
+    from PM_VR.modules.pipeline.bake_scene import SIGNATURE_VERSION
+    blue.day_signature = SIGNATURE_VERSION + '0' * 64
+    export.write_variant_manifest(project)
+    missing = json.load(open(os.path.join(folder, 'materialVariants.json'), encoding='utf-8'))
+    check(all(option['id'] != 'blue' for entry in missing['materialVariants'] for option in entry['options']),
+          'Manifest advertised a structurally incompatible variant')
+    check(os.path.exists(os.path.join(folder, f'{entity}_Blue.usdz')), 'Manifest cleanup deleted the old package')
+    blue.day_signature = original_signature
+    export.write_variant_manifest(project)
     layers["Unlit"].enabled = True
     layers["Emissive"].enabled = False
 

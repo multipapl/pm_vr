@@ -613,3 +613,59 @@ follow-up and no own writes target those paths. All own Blender inputs are
 private fixtures, isolated config/temp, CPU; no GPU bake or new full-UniPlace
 export needed. Heartbeat remains PAUSED. Owner restarts only the isolated
 D:/Blender_Python_v3/Blender_v3.bat; ordinary Blender remains v2.0.1.
+
+## 2026-10-02 — Pre-release review and folder organization (active)
+
+Owner authorized: prepare existing-project folder organization before promotion,
+fresh whole-addon review, update the shared Sync guide. Production promotion/main
+merge/release tag remain unauthorized. Explicit shared-guide write is the only
+exception to the production Sync write restriction. No subagents used.
+
+Implemented and verified on private fixtures: explicit Organize Local Files,
+SHA256 copies + live blend backup + path remapping + save-before-archive + journal
+rollback; no automatic move on load. Recognized Beauty_Bakes/PMVR_Flattened/
+PMVR_Logs/Lightmaps/PM_Selected_Textures -> PMVR/Bakes/Flattened/Logs/Lightmaps/
+Textures. Complete pre-migration blend and old folders remain in PMVR/Backups.
+Collision, save failure, multi-scene, save/reopen, repeat no-op, closed-project
+rollback, linked-node refusal and real GUI confirmation tested. Source data,
+Sync and unknown/manual/other-addon folders stay where they are.
+
+Fresh review fixes: default-look rename partial inventory retention; deleted-look
+descriptor cleanup; malformed unrelated metadata handling; Ready-only atomic
+variant manifests; final metadata errors in summary; RK shader-name protection
+and Runtime naming exemption in Optimize; project configuration locks during
+operations. New Lightmaps/Optimize externalized textures use PMVR. Independent
+working-directory format2 pins implicit old paths from v2 and earlier v3 before
+new defaults are applied. No generated SCHEMA_VERSION/signature input changes.
+
+Full fixture suite: 35 background +21 real-window cases PASS (56 total). First
+run found a new TEST had assumed 'v2:' rather than the ACTUAL protected '2:'
+signature prefix; corrected the test to import SIGNATURE_VERSION, then full
+suite passed. Latest linked-node/reparse protection also has targeted PASS.
+Static inventory covers61 Python files/whole addon including selection_targets;
+no duplicate registration IDs or invalid log keywords. Semantic scope/findings
+are documented in docs/RELEASE_CANDIDATE_REVIEW_2026-10-02.md.
+
+Fresh snapshot: C:/Users/papl/Desktop/PMVR_v3_test/ReleaseReview_2026-10-02.
+Raw_reference.blend is a FILE COPY of the current saved original; provenance
+is in _environment/release_production_guard.json. Raw copy was isolated with
+load-time disk logging disabled. Own Beauty/Flattened/Logs copied from production;
+textures/assets/IES remain absolute read-only originals. Every output path
+audited inside the private root. Do not bake/export Raw_reference.blend.
+
+Before/ contains full Day/Evening USDZ+Variants and scene fingerprint (PASS).
+UniPlace_review.blend was then successfully organized and reopened: 1070 files,
+14217044288 bytes, all stored DAY/EVENING bake fields exactly preserved. Journal
+phase COMPLETE; before blend and original folders are under private PMVR/Backups.
+The Before exporter loaded path format1 before the independent format2 upgrade;
+allow that one deliberate project field change plus exact remapped file paths
+in the before/after fingerprint comparison, nothing else.
+
+PENDING: After/ save/reopen + full USDZ export is running in the isolated process
+(release_after.log). Let it finish; compare all packages with Before/ using
+tests/compare_reference_exports.py, and normalize only verified moved-file paths
+and path-format1->2 in the fingerprint. Then append the new Mac/history section
+to the CURRENT shared guide (backup its bytes outside Sync first), record final
+acceptance/production hashes, commit/push review docs. Do not redo snapshot or
+rerun full fixture suite without new changes/failures. Original production main
+is clean7e890086; bake_scene.py/constants.py still match v2.0.0. Heartbeat PAUSED.

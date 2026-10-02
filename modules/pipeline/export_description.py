@@ -56,7 +56,7 @@ def _current_files(project, state, excluded):
         entity = variants.usd_name(matches[0].name)
         for variant in unit.variants:
             if variants.variant_status(unit, variant, state) == 'Ready':
-                name = variants.model_path(entity, variant, state)
+                name = variants.model_path(entity, variant, state, project)
                 files[name] = {'file': name, 'type': 'VARIANT'}
     return files
 
@@ -70,12 +70,27 @@ def write(project, state, written=(), excluded=()):
     staging = Path(bpy.path.abspath(project.usdz_output_directory)).resolve()
     look = look_info(project, state)
     path = staging / ('PMVR_Export_' + look['name'] + '.json')
-    previous = []
-    if path.exists():
-        value = json.loads(path.read_text(encoding='utf-8'))
-        if value.get('schema') != 1 or value.get('look', {}).get('id') != state:
+    previous, descriptions = [], []
+    for existing in staging.glob('PMVR_Export_*.json'):
+        try:
+            value = json.loads(existing.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            if existing == path:
+                raise ValueError('Current export description cannot be read: ' + existing.name)
+            continue
+        valid = (isinstance(value, dict) and value.get('schema') == 1
+                 and isinstance(value.get('look'), dict)
+                 and isinstance(value['look'].get('id'), str)
+                 and isinstance(value.get('files'), list))
+        if existing == path and (not valid or value['look']['id'] != state):
             raise ValueError('Export description has an incompatible schema or lighting ID')
-        previous = value.get('files', [])
+        if not valid:
+            continue
+        descriptions.append((existing, value))
+        if value['look']['id'] == state:
+            # Default-look renames do not change package filenames: preserve
+            # other valid committed entries during a partial export.
+            previous.extend(value['files'])
     allowed = _current_files(project, state, set(excluded))
     candidates = {item['file'] for item in previous
                   if isinstance(item, dict) and isinstance(item.get('file'), str)
@@ -95,13 +110,10 @@ def write(project, state, written=(), excluded=()):
     _atomic_json(path, document)
     # A renamed look must not remain discoverable through its old description.
     # Packages remain on disk; only metadata owned by this look is replaced.
-    for previous_path in staging.glob('PMVR_Export_*.json'):
+    current_ids = {item.look_id for item in project.lighting_looks}
+    for previous_path, old in descriptions:
         if previous_path == path:
             continue
-        try:
-            old = json.loads(previous_path.read_text(encoding='utf-8'))
-        except (ValueError, OSError):
-            continue
-        if old.get('schema') == 1 and old.get('look', {}).get('id') == state:
+        if old['look']['id'] == state or old['look']['id'] not in current_ids:
             previous_path.unlink()
     return str(path)

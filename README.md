@@ -38,10 +38,24 @@ authoring cameras remain unchanged.
 Probe Empties export at the root with world positions, so rotated/scaled
 parents and nested camera rigs cannot affect their orientation or leak cameras.
 The `?` button next to it lists the naming and scene rules the pipeline relies on.
-New projects create `PMVR/Bakes`, `Flattened`, `Logs` and `ProbePreviews` beside
+New projects create `PMVR/Bakes`, `Flattened`, `Logs`, `ProbePreviews`,
+`Lightmaps` and `Textures` beside
 the saved `.blend` during Initialize (or its first save). Existing projects keep
 their configured paths, including implicit legacy `Beauty_Bakes`,
 `PMVR_Flattened` and `PMVR_Logs`; loading never moves their files.
+**Organize Local Files** in Project Settings is a separate, one-time action for
+existing projects. It copies and SHA256-verifies the recognized local folders,
+updates image/variant/settings paths, saves the `.blend`, then archives the old
+folders with a pre-migration `.blend` in `PMVR/Backups/BeforeOrganization_*`.
+No rebake is needed. Custom external folders, Sync and owner source assets stay
+where they are. Existing destinations are never overwritten. An interrupted
+save restores old paths; the journal also supports a closed-project rollback.
+The rollback `.blend` must be restored to its original location before opening.
+The backup stays until the owner accepts the release; it is not auto-deleted.
+Optimize's externalized textures use `PMVR/Textures` for new projects, while
+old implicit `PM_Selected_Textures` paths stay pinned until organization.
+Optimize preserves `RK_*` shader names and accepts platform Runtime names.
+Project configuration is locked while a bake/render/export operation runs.
 Bake, export, validation and Setup changes are logged to the project's Logs
 folder (in the system temp folder while the file is unsaved). Every line is written immediately, so the log
 survives a crash; Project Settings shows the path and opens the folder. The last
