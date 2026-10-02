@@ -88,6 +88,21 @@ C:/Users/papl/Desktop/PMVR_v3_test/ReleaseReview_2026-10-02;
 Before and After contain actual full Day/Evening USDZ exports and fingerprints.
 organization_review.json and the backup journal prove the file move and hashes.
 
+- Full suite: 35 background +21 real-window cases PASS; after the Save As
+  correction, seven background +three real-window cases PASS.
+- Real organization: 1070 files, 14217044288 bytes, COMPLETE with SHA256
+  verification and exact preservation of stored Day/Evening bake fields.
+- 1314 objects/893 meshes and their fingerprints match, allowing only 502
+  verified moved-file path references and path format1->2. Save/reopen after
+  organizing and Save As to a subfolder preserve every audited reference.
+- All 30 actual before/after USDZ packages match in authored USD data and
+  packaged media SHA256. Variant manifests are identical; both per-look
+  descriptors are identical except exportedAt, with 15 entries each.
+- Current original blend and normal preferences match this task's starting
+  SHA256 values. Production main remains clean7e890086. Section19 was appended
+  to the shared Sync guide, preserving every prior byte; its prior version
+  and a write receipt are kept privately in _environment.
+
 No GPU bake is required for this follow-up. Entire bake_scene.py/constants.py
 must still match tag v2.0.0; signature functions/inputs, source/unit IDs, legacy
 DAY/EVENING storage and generated SCHEMA_VERSION=1 are protected. Final production

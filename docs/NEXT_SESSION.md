@@ -614,7 +614,7 @@ private fixtures, isolated config/temp, CPU; no GPU bake or new full-UniPlace
 export needed. Heartbeat remains PAUSED. Owner restarts only the isolated
 D:/Blender_Python_v3/Blender_v3.bat; ordinary Blender remains v2.0.1.
 
-## 2026-10-02 — Pre-release review and folder organization (active)
+## 2026-10-02 — Pre-release review and folder organization (complete; promotion pending)
 
 Owner authorized: prepare existing-project folder organization before promotion,
 fresh whole-addon review, update the shared Sync guide. Production promotion/main
@@ -661,14 +661,12 @@ The Before exporter loaded path format1 before the independent format2 upgrade;
 allow that one deliberate project field change plus exact remapped file paths
 in the before/after fingerprint comparison, nothing else.
 
-PENDING: After/ save/reopen + full USDZ export is running in the isolated process
-(release_after.log). Let it finish; compare all packages with Before/ using
-tests/compare_reference_exports.py, and normalize only verified moved-file paths
-and path-format1->2 in the fingerprint. Then append the new Mac/history section
-to the CURRENT shared guide (backup its bytes outside Sync first), record final
-acceptance/production hashes, commit/push review docs. Do not redo snapshot or
-rerun full fixture suite without new changes/failures. Original production main
-is clean7e890086; bake_scene.py/constants.py still match v2.0.0. Heartbeat PAUSED.
+After/ full actual Day/Evening export is COMPLETE. All30 USDZ match Before/
+exactly in authored USD fields and packaged-media SHA256; variant manifests
+match and both descriptions match except exportedAt (15files each). No source
+or generated geometry/material/bake binding changes after export. Do not redo
+the snapshot or full fixture suite without new changes/failures. Production
+main is clean7e890086; bake_scene.py/constants.py still matchv2.0.0. PAUSED.
 
 Follow-up during final review: real Save As to an After/ subfolder exposed
 a test harness error (relative_remap=False) and hidden variant file strings
@@ -680,4 +678,25 @@ image paths still follow Blender remapping. Folder smoke includes actual
 Save As/reopen/rollback. Seven background +three GUI targeted cases PASS.
 Final After cycles0/1 both PASS (1952 audited paths). Before/After fingerprints
 match exactly with only 502 verified folder-path remaps and path format1->2.
-Actual full export/comparison and shared-guide append remain pending.
+Actual full export/comparison PASS. Code commits c7ffa47 +04e9d66 pushedv3.
+Shared Sync guide now has section19 (UI follow-ups, review fixes, folder layout,
+rollback, fresh snapshot/evidence, Mac/content limitations and promotion status).
+Previous guide bytes retained exactly; private backup and SHA receipt are
+_environment/release_shared_guide_receipt.json. Same section is appended to
+docs/MAC_HANDOFF_2026-10-02.md. Final original blend SHA CEB8F6175A20CDF5AF31D72A3C022EDF91197388554C52B08EEAFE5E40102EF1
+and normal preference SHA match fresh starting guard; Raw_reference matches
+that saved original. This is NOT the older October1 E0044... provenance.
+
+Final evidence: _environment/release_acceptance_summary.json;
+ReleaseReview_2026-10-02/fingerprint_comparison.json, export_comparison.json,
+description_comparison.json, Before/After transition_review.json and actual
+USDZ; complete organization journal/old folders/live blend backup underPMVR.
+Static61Pythonfiles PASS, suite56PASS, targeted10PASS. No GPU bake required.
+Production inspection found no pre-existing PMVR target folders (no collision
+at review time); SimpleBake_Bakes/.old/renders/splatgen/textures/assets/Sync
+must stay where they are. Do NOT run production organization or merge/tag
+until owner authorizes promotion and his production Blender is saved/closed.
+Then PC performs the verified migration itself; owner need not sort files.
+Runtime/content/PBR preparation and VisionPro acceptance remain separate as
+section19 states. Automatic continuation remains PAUSED; no requested work
+remains for this pre-release review.
